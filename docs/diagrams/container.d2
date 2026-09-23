@@ -1,0 +1,22 @@
+direction: right
+
+control: Ventilation Control {
+  style.stroke-dash: 4
+  style.fill: transparent
+
+  sensors: Sensor Service
+  history: History {
+    shape: cylinder
+  }
+  decider: Autonomous Decider
+  actuator: Actuator Service
+
+  sensors -> history: store readings
+  history -> decider: query recent
+  decider -> actuator: validated command
+}
+
+buildsim: BuildSim
+
+buildsim -> control.sensors: read sensor state
+control.actuator -> buildsim: apply actuator state

@@ -1,0 +1,12 @@
+direction: right
+
+manager: Facility Manager {
+  shape: person
+}
+control: Ventilation Control
+buildsim: BuildSim {
+  style.stroke-dash: 4
+}
+
+manager -> control: monitors
+control -> buildsim: observes and controls through device services
