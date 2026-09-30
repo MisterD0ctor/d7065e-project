@@ -1,22 +1,48 @@
-direction: right
+vars: {
+  d2-config: {
+    layout-engine: elk
+  }
+}
 
-control: Ventilation Control {
+direction: down
+
+bs: "BuildSim\n[Software System, from course]\nShared state: sensor values,\nactuator state, 3D viewer"
+occ: "occupancysim\n[Software System, course example]\nPeople and the model clock" {
+  style.stroke-dash: 4
+}
+
+sys: "Ventilation Control  [System]" {
   style.stroke-dash: 4
   style.fill: transparent
 
-  sensors: Sensor Service
-  history: History {
+  physics: "physics\n[Container: Go]\nCO₂ and heat balance per room;\nserves the truth"
+  sensors: "sensor-co2 · sensor-temp · sensor-occupancy\n[Containers: Go, one binary]\nSample truth, add noise and faults"
+  broker: "mosquitto\n[MQTT broker]\nobs/# · truth/# · decision/#" {
+    shape: queue
+  }
+  controller: "controller\n[Container: Go]\nValidate → predict → act"
+  actuators: "actuator-damper · actuator-heating\n[Containers: Go, one binary]\nValidate, enforce safety, travel"
+  storage: "storage\n[Container: Go]\nJSONL per run; history + models" {
     shape: cylinder
   }
-  decider: Autonomous Decider
-  actuator: Actuator Service
-
-  sensors -> history: store readings
-  history -> decider: query recent
-  decider -> actuator: validated command
+  train: "train\n[Batch job: Go]\nPer-room occupancy profile"
+  viz: "viz\n[Container: Go]\nThe only room-layer publisher"
 }
 
-buildsim: BuildSim
-
-buildsim -> control.sensors: read sensor state
-control.actuator -> buildsim: apply actuator state
+occ -> bs: "Occupancy, entities [REST]"
+occ -> sys.physics: "Model clock [REST]"
+bs -> sys.physics: "Occupancy, actuator state [REST]"
+sys.sensors -> sys.physics: "Truth per room [REST]"
+sys.sensors -> bs: "Readings [REST]"
+sys.sensors -> sys.broker: "obs/# [MQTT]"
+sys.physics -> sys.broker: "truth/# [MQTT]"
+sys.broker -> sys.controller: "obs/# [MQTT]"
+sys.controller -> sys.broker: "decision/# [MQTT]"
+sys.controller -> sys.actuators: "Commands [REST]"
+sys.broker -> sys.actuators: "CO₂ for the override [MQTT]"
+sys.actuators -> bs: "Reached state [REST]"
+sys.broker -> sys.storage: "obs, truth, decisions [MQTT]"
+sys.storage -> sys.controller: "Latest model [REST]"
+sys.train <-> sys.storage: "History in, model out [REST]"
+sys.broker -> sys.viz: "obs, decisions [MQTT]"
+sys.viz -> bs: "Room layers, alerts [REST]"
