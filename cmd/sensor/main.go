@@ -1,8 +1,8 @@
 // Command sensor is a sensor gateway for one kind of sensor (KIND=co2, temp or
 // occupancy) in every configured room (D-2). It samples the truth from
-// physics (IF-2), adds noise and injected faults, and writes the reading to
-// BuildSim (IF-3). It registers its equipment at start, so a restart needs no
-// manual steps (FR-11).
+// physics (IF-2), adds noise and injected faults, writes the reading to
+// BuildSim (IF-3) and publishes it on MQTT (IF-4). It registers its equipment
+// at start, so a restart needs no manual steps (FR-11).
 package main
 
 import (
@@ -21,6 +21,8 @@ import (
 	"github.com/MisterD0ctor/d7065e-project/internal/buildsim"
 	"github.com/MisterD0ctor/d7065e-project/internal/env"
 	"github.com/MisterD0ctor/d7065e-project/internal/faults"
+	"github.com/MisterD0ctor/d7065e-project/internal/mqttx"
+	"github.com/MisterD0ctor/d7065e-project/internal/msg"
 	"github.com/MisterD0ctor/d7065e-project/internal/rooms"
 )
 
@@ -42,6 +44,8 @@ type gateway struct {
 	sample  time.Duration
 	inject  *faults.Injector
 	rng     *rand.Rand
+	mq      *mqttx.Client
+	runID   string
 	last    time.Time // model time of the last published sample
 }
 
@@ -71,6 +75,8 @@ func main() {
 		sample:  time.Duration(env.Float("SAMPLE_S", 60) * float64(time.Second)),
 		inject:  faults.NewInjector(fs),
 		rng:     rand.New(rand.NewPCG(seed, uint64(len(kind)))),
+		mq:      mqttx.Connect("sensor-" + kind),
+		runID:   env.String("RUN_ID", "dev"),
 	}
 	for _, f := range fs {
 		log.Printf("fault injected: %s on %s", f.Mode, f.Room)
@@ -161,7 +167,9 @@ func (g *gateway) tick(ctx context.Context) {
 		if !publish {
 			continue
 		}
-		g.write(ctx, k, format(g.kind, v))
+		value := format(g.kind, v)
+		g.write(ctx, k, value)
+		g.publish(k, t, value)
 	}
 }
 
@@ -199,6 +207,22 @@ func (g *gateway) write(ctx context.Context, k rooms.Key, value string) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	log.Printf("%s: reading dropped", id)
+}
+
+// publish sends the same reading on MQTT, after the BuildSim write: if the
+// broker is down, BuildSim still has it for the fallback path (D-3).
+func (g *gateway) publish(k rooms.Key, t time.Time, value string) {
+	v, _ := strconv.ParseFloat(value, 64)
+	g.mq.Publish(msg.ObsTopic(k, g.kind), msg.Observation{
+		RunID:     g.runID,
+		SensorID:  rooms.SensorID(g.kind, k),
+		Room:      k.String(),
+		Kind:      g.kind,
+		Value:     v,
+		Unit:      rooms.Sensors[g.kind].Unit,
+		ModelTime: msg.FormatTime(t),
+		Seq:       t.Unix(),
+	})
 }
 
 func format(kind string, v float64) string {

@@ -1,7 +1,8 @@
-// Command physics simulates CO₂ and temperature per room (FR-1) and serves the
-// truth to the sensor gateways (IF-2). It never writes to BuildSim: it reads
-// occupancy and the actuators' reached states from there, and the model clock
-// from occupancysim (D-1).
+// Command physics simulates CO₂ and temperature per room (FR-1), serves the
+// truth to the sensor gateways (IF-2) and publishes it for storage once per
+// model minute (IF-5). It never writes to BuildSim: it reads occupancy and the
+// actuators' reached states from there, and the model clock from occupancysim
+// (D-1).
 package main
 
 import (
@@ -18,6 +19,8 @@ import (
 	"github.com/MisterD0ctor/d7065e-project/internal/buildsim"
 	"github.com/MisterD0ctor/d7065e-project/internal/clock"
 	"github.com/MisterD0ctor/d7065e-project/internal/env"
+	"github.com/MisterD0ctor/d7065e-project/internal/mqttx"
+	"github.com/MisterD0ctor/d7065e-project/internal/msg"
 	"github.com/MisterD0ctor/d7065e-project/internal/roommodel"
 	"github.com/MisterD0ctor/d7065e-project/internal/rooms"
 	"github.com/MisterD0ctor/d7065e-project/internal/site"
@@ -46,6 +49,7 @@ type sim struct {
 	models map[rooms.Key]*roommodel.Room
 	inputs map[rooms.Key]roommodel.Inputs
 	last   time.Time // model time of the last step
+	mq     *mqttx.Client
 
 	mu   sync.RWMutex
 	snap snapshot
@@ -66,6 +70,7 @@ func main() {
 		keys:   keys,
 		models: map[rooms.Key]*roommodel.Room{},
 		inputs: map[rooms.Key]roommodel.Inputs{},
+		mq:     mqttx.Connect("physics"),
 	}
 	s.loadRooms(ctx)
 
@@ -197,11 +202,17 @@ func (s *sim) publish(t time.Time) {
 	s.snap = snap
 	s.mu.Unlock()
 
-	// Until storage exists, the truth goes to our own log once per model
-	// minute, so a run can still be inspected.
-	if prev == "" || t.Truncate(time.Minute).Format(time.RFC3339) != mustTrunc(prev) {
-		b, _ := json.Marshal(snap)
-		log.Printf("truth %s", b)
+	// Once per model minute the truth goes to storage (IF-5).
+	if prev != "" && t.Truncate(time.Minute).Format(time.RFC3339) == mustTrunc(prev) {
+		return
+	}
+	for _, k := range s.keys {
+		r := snap.Rooms[k.String()]
+		s.mq.Publish(msg.TruthTopic(k), msg.Truth{
+			RunID: s.runID, Room: k.String(), ModelTime: snap.ModelTime,
+			CO2: r.CO2, Temp: r.Temp, Occupancy: r.Occupancy,
+			Airflow: r.Airflow, Setpoint: r.Setpoint,
+		})
 	}
 }
 

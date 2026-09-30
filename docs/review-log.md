@@ -4,6 +4,15 @@ Two things the oral exam asks about (Lecture 1, slide 55): where AI advice was
 wrong and how we caught it, and why the design looks the way it does. Add an
 entry whenever either happens. Newest first.
 
+## 2026-09-30: storage and MQTT
+
+| Finding | How it was caught | Fix |
+|---|---|---|
+| The fallback waited 5 s real before polling BuildSim, but at factor 60 that is 5 model-minutes, longer than the 3-minute command TTL. Every broker outage expired the damper's commands before the fallback began | T-24: stopped `mosquitto`, saw `ttl_expired` in the actuator log | Silence threshold adapts to the arrival rate (2.5× the gap, ≥ 1.5 s); command TTL raised to 300 model-s. Rerun: no expiry; fallback after 4 s real, back on MQTT when the broker returned |
+| The broker couldn't read its bind-mounted config on Fedora | Container log: `Permission denied` | SELinux relabel (`:z`) on the mounts |
+| While the broker was down, storage recorded nothing for ~20 model-minutes | T-24, gap in `truth.jsonl` | None: IF-5 says gaps are reported, not filled. The evaluation must count missing minutes |
+| T-27 passes: with the controller's login, subscribing to `truth/#` receives nothing; storage's login receives the truth | Manual `mosquitto_sub` with both logins | — |
+
 ## 2026-09-30: first slice running
 
 | Finding | How it was caught | Fix |

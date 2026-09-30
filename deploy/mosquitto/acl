@@ -1,0 +1,28 @@
+# Who may publish (write) and subscribe (read) what. Anything not listed is
+# denied. Only storage may read truth/#: the controller must never see the
+# truth (Lecture 2, slide 8; test T-27).
+
+user physics
+topic write truth/#
+
+user sensor
+topic write obs/#
+
+user controller
+topic read obs/#
+topic write decision/#
+
+user actuator
+topic read obs/#
+topic write event/#
+
+user storage
+topic read obs/#
+topic read truth/#
+topic read decision/#
+topic read event/#
+
+user viz
+topic read obs/#
+topic read decision/#
+topic read event/#

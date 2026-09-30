@@ -123,7 +123,12 @@ its IF-3 write.
 - **Stale:** the consumer judges freshness by `model_time`, never by arrival
   time. Older than 180 model-s → stale.
 - **On failure (broker down):** the gateway still writes IF-3, so the
-  controller falls back to polling BuildSim (D-3).
+  controller and the damper actuator fall back to polling BuildSim (D-3).
+  "Silent" means no observation for 2.5× the usual real-time gap between
+  them (at least 1.5 s). The threshold adapts because one model minute is
+  1 s real at factor 60 but 0.1 s at factor 600. It must stay below the
+  command TTL (IF-8), or an outage expires commands before the fallback
+  starts.
 
 ## IF-5. Truth `truth/<level>/<room>`
 
@@ -188,8 +193,8 @@ Published on every change, not every tick.
   "cmd_id": "3f0c6c1e-…",
   "value": 308.0,
   "unit": "l/s",
-  "issued_at": "2026-09-14T10:15:00",
-  "ttl_s": 180,
+  "issued_at": "2026-09-14T10:15:00Z",
+  "ttl_s": 300,
   "reason": "predictive: 25 expected in 12 min"
 }
 ```
@@ -239,13 +244,20 @@ Registered by each actuator at start, like IF-3:
 
 | Call | Returns |
 |---|---|
-| `GET /history?room=level0/A109&kind=co2&from=…&to=…` | JSONL, one IF-4/5/6/7 record per line, in model-time order |
+| `GET /history?run=…&room=level0/A109&kind=co2&from=…&to=…` | JSONL, one IF-4/5/6/7 record per line, in the order stored. `run` defaults to storage's own `RUN_ID`; `from` is inclusive, `to` exclusive |
+| `GET /runs` | The recorded run ids, oldest first |
 | `PUT /models/{name}` | Stores a model (JSON); `201` |
 | `GET /models/latest` | The newest model, with its `name` |
 | `GET /runs/{run_id}/export` | A tar of the run's JSONL files, for offline analysis |
 
 `kind` is `co2`, `temp`, `occupancy`, `true_occupancy`, `truth`, `decision` or
 `event`. `from` and `to` are model time.
+
+Storage validates every record before appending it: JSON, a safe `run_id`, a
+room, and an RFC 3339 `model_time` (decisions from the REST fallback may lack
+one). Bad records are logged and counted at `GET /healthz`, never silently
+dropped. Observations are deduplicated on `(run_id, sensor_id, seq)`.
+Published on `127.0.0.1:8090` for people and notebooks.
 
 Model format (the per-room time-of-day profile, FR-4):
 

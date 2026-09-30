@@ -33,17 +33,54 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  # ---- Ventilation Control: first slice (one room, REST only) ----
+  # ---- Ventilation Control ----
   # One Dockerfile builds every service; CMD picks the ./cmd/<name> to build.
-  # ROOMS lists the rooms as <level>/<room>; the first slice uses one.
+  # ROOMS lists the rooms as <level>/<room>. RUN_ID tags every record, so
+  # set a new one per experiment: RUN_ID=reactive-s1 docker compose up -d
+  #
+  # MQTT passwords are plain text here on purpose: this is a local lab stack.
+  # The broker's ACL (deploy/mosquitto/acl) is what keeps the truth away from
+  # the controller.
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    entrypoint: ["/bin/sh", "/deploy/entrypoint.sh"]
+    environment:
+      MQTT_PASSWORDS: >-
+        physics:physics-pw sensor:sensor-pw controller:controller-pw
+        actuator:actuator-pw storage:storage-pw viz:viz-pw
+    volumes:
+      - ./deploy/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro,z
+      - ./deploy/mosquitto/acl:/mosquitto/config/acl:ro,z
+      - ./deploy/mosquitto/entrypoint.sh:/deploy/entrypoint.sh:ro,z
+    ports:
+      - "127.0.0.1:1883:1883"
+    restart: unless-stopped
+
+  storage:
+    build: { context: ., args: { CMD: storage } }
+    environment:
+      RUN_ID: ${RUN_ID:-dev}
+      DATA_DIR: /data
+      MQTT_USER: storage
+      MQTT_PASS: storage-pw
+    volumes:
+      - storage-data:/data
+    ports:
+      - "127.0.0.1:8090:8080"   # history, models, exports
+    depends_on: [mosquitto]
+    restart: unless-stopped
 
   physics:
     build: { context: ., args: { CMD: physics } }
     environment: &common
       ROOMS: level0/1570   # a fika room: breaks around 09:45 and 14:30
-      RUN_ID: dev
+      RUN_ID: ${RUN_ID:-dev}
       BUILDSIM_URL: http://buildsim:9090
       CLOCK_URL: http://occupancysim:8081
+      MQTT_URL: tcp://mosquitto:1883
+      MQTT_USER: physics
+      MQTT_PASS: physics-pw
     depends_on:
       buildsim: { condition: service_healthy }
       occupancysim: { condition: service_started }
@@ -55,6 +92,8 @@ services:
       <<: *common
       KIND: co2
       PHYSICS_URL: http://physics:8080
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
       FAULTS: ""   # e.g. "stuck:level0/1570" or "drift:level0/1570:+50"
     depends_on: [physics]
     restart: unless-stopped
@@ -64,6 +103,8 @@ services:
     environment:
       <<: *common
       KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
     depends_on:
       buildsim: { condition: service_healthy }
     restart: unless-stopped
@@ -74,5 +115,10 @@ services:
       <<: *common
       POLICY: ${POLICY:-reactive}   # constant | reactive
       DAMPER_URL: http://actuator-damper:8080
+      MQTT_USER: controller
+      MQTT_PASS: controller-pw
     depends_on: [actuator-damper]
     restart: unless-stopped
+
+volumes:
+  storage-data:
