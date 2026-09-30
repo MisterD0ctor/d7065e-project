@@ -15,7 +15,7 @@ under load), **eval** (full evaluation runs).
 | T-03 | Noise statistics: 10 000 samples of a constant truth | unit | FR-2 | Mean error ≈ 0, spread matches the configured σ for each kind |
 | T-04 | Fault modes: stuck, dropout, drift, lag on one sensor | unit | FR-2 | Each produces its configured signal; other sensors are untouched |
 | T-05 | One room end to end: raise the airflow command, watch the next readings | integration | FR-3 | The loop closes: CO₂ readings fall after the reached airflow rises (IF-8 → IF-9 → physics → IF-3) |
-| T-06 | Predictor vs. naive "same as now" on a held-out day | unit | FR-4 | Lower MAE at the lead time for fika rooms and offices; lecture rooms reported separately |
+| T-06 | Predictor vs. naive "same as now" on held-out days | unit (miniature: `predict_test.go`) + eval | FR-4 | Lower error at the lead time for fika rooms and offices; lecture rooms reported separately. The unit test checks the profile foresees a break that "same as now" misses |
 | T-07 | Actuator validation: out-of-range, wrong unit, expired, duplicate `cmd_id` | unit | FR-5 | 422, 422, 409, 200-duplicate; state unchanged for all four |
 | T-08 | Travel rate: command a jump from minimum to maximum | unit | FR-5 | Reached state rises at ≤ 10 % of max per model-minute |
 | T-09 | CO₂ override: inject 1200 ppm while the policy asks for the floor | fault | FR-6 | Damper goes to maximum; `override_co2` event; releases below 1100 ppm |
@@ -41,6 +41,8 @@ under load), **eval** (full evaluation runs).
 | T-29 | Installer mistakes: a room not in the floor plan, an unknown kind, an id already taken | unit + integration | FR-11, D-10 | 422, 422, 409; nothing stored |
 | T-30 | Retire a device | integration | FR-11, D-10 | It stops reporting at its next check-in (≤ 30 s); its equipment leaves BuildSim |
 | T-31 | Register a CO₂ sensor's id as a damper, then start the sensor | integration | D-10 | The device refuses to start and says the registry entry is wrong |
+| T-32 | Policies differ only where they should (`policy_test.go`) | unit | FR-9 | Constant = design flow; reactive ignores people; predictive ventilates for expected people in clean air and still reacts to CO₂; flows capped at the room's maximum |
+| T-33 | The live run's truth over the storage API | integration | §0 scope | `403`; a finished run's truth is served (for the oracle) |
 
 T-22 is the grade-5 test ("finds the limits", Lecture 1, slide 53): report
 where the system stops working, not only that 50 rooms work.

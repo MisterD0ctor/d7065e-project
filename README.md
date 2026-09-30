@@ -56,6 +56,18 @@ go run ./cmd/gendevices            # regenerate compose.devices.yaml from it
 Each room gets a CO₂, temperature and occupancy sensor, a damper and a
 radiator valve. Physics simulates exactly the rooms in the list.
 
+### Policies, training and the oracle
+
+```
+POLICY=reactive docker compose up -d controller                       # constant | reactive | predictive | oracle
+TRAIN_RUNS=train-1 MODEL_NAME=profile-a docker compose run --rm train # train on recorded runs
+POLICY=predictive docker compose up -d controller                     # uses the newest model
+POLICY=oracle ORACLE_RUN=eval-reactive docker compose up -d controller # replay that run's true occupancy
+```
+
+The oracle must replay a run of the **same seed and dates**. Storage refuses
+the live run's truth, so it can only ever read a finished run.
+
 ### While developing
 
 ```

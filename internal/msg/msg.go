@@ -46,6 +46,7 @@ type Decision struct {
 	Mode               string             `json:"mode"`
 	Observed           map[string]float64 `json:"observed"`
 	PredictedOccupancy *float64           `json:"predicted_occupancy,omitempty"`
+	LeadMin            float64            `json:"lead_min,omitempty"`
 	AirflowTarget      *float64           `json:"airflow_target_ls,omitempty"`
 	SetpointTarget     *float64           `json:"setpoint_target_c,omitempty"`
 	CmdID              string             `json:"cmd_id"`

@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os/signal"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -33,8 +34,7 @@ import (
 )
 
 const (
-	// Reactive ventilation: airflow rises linearly from the lowest allowed
-	// flow at ReactiveLow ppm to maximum at ReactiveHigh ppm.
+	// Reactive ventilation: see reactiveFlow.
 	ReactiveLow  = 600.0
 	ReactiveHigh = 1000.0
 
@@ -45,7 +45,14 @@ const (
 	CommandTTL   = 300 // model seconds: five missed readings
 	StaleAfter   = 180 * time.Second
 	RefreshPlant = 30 * time.Second // how often to re-read the registry
+	ReloadModel  = 5 * time.Minute  // how often to look for a newer model
 )
+
+// count is an occupancy reading and the model time it was taken.
+type count struct {
+	n  float64
+	at time.Time
+}
 
 // plant is what is installed in one room.
 type plant struct {
@@ -73,16 +80,21 @@ type controller struct {
 	newest      time.Time            // newest model time seen on any observation
 	polled      map[string]time.Time // BuildSim timestamp of the last polled reading acted on, by device
 	fallback    bool
+	people      map[rooms.Key]count // latest occupancy count per room
+
+	forecast forecast         // predictive and oracle only
+	profile  *profileForecast // predictive only, for reloading
 }
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	policy := env.String("POLICY", "reactive")
-	if policy != "reactive" && policy != "constant" {
-		log.Fatalf("POLICY=%q: want constant or reactive", policy)
+	policy := env.String("POLICY", Reactive)
+	if !policies[policy] {
+		log.Fatalf("POLICY=%q: want constant, reactive, predictive or oracle", policy)
 	}
+	storage := strings.TrimRight(env.String("STORAGE_URL", "http://storage:8080"), "/")
 	c := &controller{
 		policy: policy,
 		reg:    devreg.New(env.String("REGISTRY_URL", "http://registry:8080")),
@@ -93,20 +105,41 @@ func main() {
 		dedup:  mqttx.NewDedup(),
 		plants: map[rooms.Key]plant{},
 		polled: map[string]time.Time{},
+		people: map[rooms.Key]count{},
+	}
+	slow := &http.Client{Timeout: 2 * time.Minute}
+	switch policy {
+	case Predictive:
+		c.profile = &profileForecast{storage: storage, http: slow}
+		c.forecast = c.profile
+		c.reloadModel(ctx)
+	case Oracle:
+		run := env.Must("ORACLE_RUN") // the recorded run of the same seed and dates
+		o, err := loadOracle(ctx, slow, storage, run)
+		if err != nil {
+			log.Fatalf("oracle: %v", err)
+		}
+		c.forecast = o
+		log.Printf("oracle: replaying the true occupancy of run %s (%d rooms)", run, len(o.byRoom))
 	}
 	c.refreshPlants(ctx)
 	c.mq.Subscribe("obs/+/+/"+rooms.CO2, func(_ string, p []byte) { c.onObservation(ctx, p) })
 	c.mq.Subscribe("obs/+/+/"+rooms.Temp, func(_ string, p []byte) { c.onObservation(ctx, p) })
+	c.mq.Subscribe("obs/+/+/"+rooms.Occupancy, func(_ string, p []byte) { c.onObservation(ctx, p) })
 	log.Printf("policy %s", policy)
 
 	tick := time.NewTicker(time.Second)
 	defer tick.Stop()
 	refresh := time.NewTicker(RefreshPlant)
 	defer refresh.Stop()
+	reload := time.NewTicker(ReloadModel)
+	defer reload.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-reload.C:
+			c.reloadModel(ctx)
 		case <-refresh.C:
 			c.refreshPlants(ctx)
 		case <-tick.C:
@@ -236,6 +269,21 @@ func (c *controller) pollIfSilent(ctx context.Context) {
 	}
 }
 
+// reloadModel picks up a newer trained profile. Without any model the
+// predictive policy runs as reactive and says so in its decisions.
+func (c *controller) reloadModel(ctx context.Context) {
+	if c.profile == nil {
+		return
+	}
+	name, err := c.profile.Load(ctx)
+	switch {
+	case err != nil:
+		log.Printf("model: %v (keeping the current one)", err)
+	case name != "":
+		log.Printf("model: using %s", name)
+	}
+}
+
 // act decides and commands one room for one reading. A room whose sensor goes
 // quiet gets no commands, so its actuator's TTL expires and it falls back to
 // design flow or 21 °C: the degraded mode for a missing sensor (FR-7) needs
@@ -247,11 +295,30 @@ func (c *controller) act(ctx context.Context, k rooms.Key, kind string, value fl
 	}
 	var endpoint, unit, reason string
 	var target float64
+	mode := "normal"
+	var predicted *float64
+	var leadMin float64
 	switch kind {
+	case rooms.Occupancy:
+		// Occupancy only feeds the next airflow decision.
+		c.mu.Lock()
+		c.people[k] = count{n: value, at: t}
+		c.mu.Unlock()
+		return
 	case rooms.CO2:
 		endpoint, unit = p.damper, "l/s"
-		target = c.airflow(p.size, value)
+		people, m := c.peopleFor(k, p.size, t)
+		mode = m
+		if c.forecast != nil {
+			lead := leadTime(p.size)
+			leadMin = lead.Minutes()
+			predicted = &people
+		}
+		target = airflow(c.policy, p.size, value, people)
 		reason = fmt.Sprintf("%s: CO₂ %.0f ppm", c.policy, value)
+		if predicted != nil {
+			reason += fmt.Sprintf(", %.0f people within %.0f min", people, leadMin)
+		}
 	case rooms.Temp:
 		endpoint, unit = p.heating, "°C"
 		target = SetbackSetpoint
@@ -272,7 +339,8 @@ func (c *controller) act(ctx context.Context, k rooms.Key, kind string, value fl
 	status, res := c.command(ctx, endpoint, k, cmd)
 	d := msg.Decision{
 		RunID: c.runID, Room: k.String(), ModelTime: modelTime, Policy: c.policy,
-		Mode: "normal", Observed: map[string]float64{kind: value},
+		Mode: mode, Observed: map[string]float64{kind: value},
+		PredictedOccupancy: predicted, LeadMin: leadMin,
 		CmdID: cmd.CmdID, Status: status, AppliedTarget: res.Target,
 		Clamped: res.Clamped, Reason: reason,
 	}
@@ -284,14 +352,30 @@ func (c *controller) act(ctx context.Context, k rooms.Key, kind string, value fl
 	c.mq.Publish(msg.DecisionTopic(k), d)
 }
 
-// airflow proposes a flow. It asks for as little as the policy wants and
-// leaves the floors and the CO₂ override to the actuator (D-6).
-func (c *controller) airflow(size sizing.Room, co2 float64) float64 {
-	if c.policy == "constant" {
-		return size.Design
+// peopleFor is how many people to ventilate room k for at model time t: the
+// most of the count now and the forecast within the lead time. The mode says
+// what the answer rests on (IF-6).
+func (c *controller) peopleFor(k rooms.Key, size sizing.Room, t time.Time) (float64, string) {
+	if c.forecast == nil {
+		return 0, "normal"
 	}
-	frac := min(max((co2-ReactiveLow)/(ReactiveHigh-ReactiveLow), 0), 1)
-	return size.Empty + frac*(size.Max-size.Empty)
+	mode := "normal"
+	var now float64
+	if c.policy == Predictive {
+		c.mu.Lock()
+		r, ok := c.people[k]
+		c.mu.Unlock()
+		if ok && t.Sub(r.at) <= StaleAfter {
+			now = r.n
+		} else {
+			mode = "degraded_occupancy" // counter stale or missing: forecast and CO₂ only
+		}
+	}
+	expected, ok := c.forecast.Expected(k.String(), t, leadTime(size))
+	if !ok && mode == "normal" {
+		mode = "no_forecast"
+	}
+	return max(now, expected), mode
 }
 
 // command sends one command, retrying the same cmd_id so a lost reply can't

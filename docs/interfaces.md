@@ -178,9 +178,16 @@ Published once per control period (60 model-s) per room.
 }
 ```
 
-`mode` is `normal`, `degraded_occupancy` (occupancy sensor bad → CO₂-reactive)
-or `degraded_co2` (CO₂ bad → design flow). `viz` turns non-normal modes into
-alerts (FR-7).
+One record per command: an airflow decision carries `airflow_target_ls`, a
+heating decision `setpoint_target_c`. For `predictive` and `oracle`,
+`predicted_occupancy` is the number of people ventilated for (the most of the
+count now and the forecast within `lead_min`).
+
+`mode` is `normal`; `degraded_occupancy` (the occupancy count is stale or
+missing, so the decision rests on the forecast and CO₂); `no_forecast` (no
+trained model yet, so `predictive` acts as `reactive`); or `degraded_co2`
+(CO₂ missing: no command is sent, and the damper's TTL returns it to design
+flow). `viz` turns non-normal modes into alerts (FR-7).
 
 ## IF-7. Actuator events `event/<level>/<room>`
 
@@ -270,18 +277,26 @@ one). Bad records are logged and counted at `GET /healthz`, never silently
 dropped. Observations are deduplicated on `(run_id, sensor_id, seq)`.
 Published on `127.0.0.1:8090` for people and notebooks.
 
-Model format (the per-room time-of-day profile, FR-4):
+Model format (the per-room time-of-day profile, FR-4), written by `train`:
 
 ```json
 {
-  "name": "profile-2026-09-30T1200",
-  "trained_on": {"run_ids": ["…"], "from": "…", "to": "…"},
+  "name": "profile-20261001T120000",
   "slot_min": 15,
-  "rooms": {"level0/A109": {"weekday": [0, 0, 0.2, 1.1, …]}}
+  "quantile": 0.8,
+  "trained_on": {"run_ids": ["train-1"], "from": "…", "to": "…", "weekdays": 5, "readings": 140000},
+  "rooms": {"level0/1570": {"mean": [0, …], "high": [0, …], "days": [5, …]}}
 }
 ```
 
-96 values per room: the mean occupancy per 15-minute slot on weekdays.
+96 slots per room (15 min each), weekdays only. `mean` is the mean of each
+day's peak count in the slot; `high` the 80 % quantile across days, which is
+what the controller ventilates for. Trained on **occupancy sensor readings**,
+never on the truth.
+
+**The live run's truth is not served:** `GET /history?kind=truth` or
+`kind=true_occupancy` for storage's own `RUN_ID` returns `403`. The oracle
+replays an earlier, finished run; the evaluation reads the export.
 
 - **On failure:** consumers time out after 2 s. The controller keeps its last
   model (D-5); `train` exits non-zero and can be rerun.

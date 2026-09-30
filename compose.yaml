@@ -116,7 +116,9 @@ services:
     build: { context: ., args: { CMD: controller } }
     environment:
       RUN_ID: ${RUN_ID:-dev}
-      POLICY: ${POLICY:-reactive}   # constant | reactive
+      POLICY: ${POLICY:-reactive}   # constant | reactive | predictive | oracle
+      ORACLE_RUN: ${ORACLE_RUN:-}   # oracle only: the recorded run to replay
+      STORAGE_URL: http://storage:8080
       REGISTRY_URL: http://registry:8080
       BUILDSIM_URL: http://buildsim:9090
       MQTT_URL: tcp://mosquitto:1883
@@ -124,6 +126,17 @@ services:
       MQTT_PASS: controller-pw
     depends_on: [registry]
     restart: unless-stopped
+
+  # Offline training (D-5): not part of `up`. Run it after recording runs:
+  #   TRAIN_RUNS=train-1 docker compose run --rm train
+  train:
+    build: { context: ., args: { CMD: train } }
+    profiles: [train]
+    environment:
+      STORAGE_URL: http://storage:8080
+      TRAIN_RUNS: ${TRAIN_RUNS:-}
+      MODEL_NAME: ${MODEL_NAME:-}
+    depends_on: [storage]
 
 volumes:
   storage-data:

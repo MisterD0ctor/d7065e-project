@@ -91,6 +91,13 @@ func (s *service) handleHistory(w http.ResponseWriter, r *http.Request) {
 	if query.Run == "" {
 		query.Run = s.defaultRun
 	}
+	// The live run's truth is not served: the truth must not reach the
+	// controller while it runs (Lecture 2, slide 8). The oracle replays a
+	// finished run; the evaluation uses the export after the run.
+	if (query.Kind == "truth" || query.Kind == "true_occupancy") && query.Run == s.defaultRun {
+		http.Error(w, "the live run's truth is not served; use /runs/{id}/export after the run", http.StatusForbidden)
+		return
+	}
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	if err := s.st.History(w, query); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)

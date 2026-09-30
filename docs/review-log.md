@@ -4,6 +4,21 @@ Two things the oral exam asks about (Lecture 1, slide 55): where AI advice was
 wrong and how we caught it, and why the design looks the way it does. Add an
 entry whenever either happens. Newest first.
 
+## 2026-09-30: predictor, predictive and oracle policies
+
+- `train` builds the per-room weekday profile from the occupancy **sensor**
+  readings of recorded runs and stores it in storage; the controller picks up
+  the newest model every 5 min and keeps the last good one.
+- `predictive` ventilates for the most of the count now and the profile's
+  80 % quantile within the lead time (the room's τ, 10–30 min), and still
+  reacts to CO₂. `oracle` does the same with the true occupancy of a recorded
+  run of the same date.
+- Smoke test (trained and tested on the same day, so not an evaluation):
+  in fika room `level0/1570` the predictive policy raised the airflow to
+  112 l/s at 09:28 for 11 expected people, ~20 min before the break, with CO₂
+  at 417 ppm. The oracle loaded the recorded truth of `scale50-reactive-3`.
+- Storage now refuses the live run's truth (`403`, T-33).
+
 ## 2026-09-30: first 50-room run (250 device containers)
 
 Every limit hit was the laptop's, not the design's. Each one is a data point
