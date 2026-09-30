@@ -1,4 +1,5 @@
-// Package rooms parses room keys and derives the device ids of IF-3 and IF-9.
+// Package rooms parses room keys and names the device kinds with their
+// BuildSim equipment types (IF-3, IF-9).
 package rooms
 
 import (
@@ -14,9 +15,6 @@ type Key struct {
 }
 
 func (k Key) String() string { return k.Level + "/" + k.Name }
-
-// slug is used inside device ids, which may not contain "/".
-func (k Key) slug() string { return k.Level + "-" + k.Name }
 
 func Parse(s string) (Key, error) {
 	level, name, ok := strings.Cut(strings.TrimSpace(s), "/")
@@ -59,33 +57,23 @@ const (
 )
 
 type SensorSpec struct {
-	EquipmentPrefix string
-	EquipmentType   string
-	SensorSuffix    string
-	SensorType      string
-	Unit            string
+	EquipmentType string // drives the icon in the 3D viewer
+	SensorType    string
+	Unit          string
 }
 
 var Sensors = map[string]SensorSpec{
-	CO2:       {"co2", "co2_sensor", "co2", "co2", "ppm"},
-	Temp:      {"temp", "temperature_sensor", "temp", "temperature", "°C"},
-	Occupancy: {"occ", "occupancy_counter", "occ", "occupancy", "persons"},
+	CO2:       {"co2_sensor", "co2", "ppm"},
+	Temp:      {"temperature_sensor", "temperature", "°C"},
+	Occupancy: {"occupancy_counter", "occupancy", "persons"},
 }
 
 type ActuatorSpec struct {
-	EquipmentPrefix string
-	EquipmentType   string
-	ActuatorSuffix  string
-	ActuatorType    string
+	EquipmentType string
+	ActuatorType  string
 }
 
 var Actuators = map[string]ActuatorSpec{
-	Damper:  {"vent", "ventilation_fan", "airflow", "airflow"},
-	Heating: {"heat", "radiator", "setpoint", "setpoint"},
+	Damper:  {"ventilation_fan", "airflow"},
+	Heating: {"radiator", "setpoint"},
 }
-
-func EquipmentID(prefix string, k Key) string { return prefix + "-" + k.slug() }
-
-func SensorID(kind string, k Key) string { return k.slug() + "-" + Sensors[kind].SensorSuffix }
-
-func ActuatorID(kind string, k Key) string { return k.slug() + "-" + Actuators[kind].ActuatorSuffix }

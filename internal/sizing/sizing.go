@@ -25,13 +25,13 @@ const (
 
 // Room is one room's geometry and flow limits, all flows in l/s.
 type Room struct {
-	AreaM2   float64
-	VolumeM3 float64
-	Capacity int
-	Design   float64
-	Max      float64
-	Occupied float64 // floor during occupied hours
-	Empty    float64 // floor outside them
+	AreaM2   float64 `json:"area_m2"`
+	VolumeM3 float64 `json:"volume_m3"`
+	Capacity int     `json:"capacity"`
+	Design   float64 `json:"design_ls"`
+	Max      float64 `json:"max_ls"`
+	Occupied float64 `json:"occupied_min_ls"` // floor during occupied hours
+	Empty    float64 `json:"empty_min_ls"`    // floor outside them
 }
 
 // AreaM2 converts a floor-plan area (units²) to m².

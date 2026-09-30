@@ -125,6 +125,7 @@ func (s *sim) tick(ctx context.Context) {
 		s.publish(now.Time)
 		return
 	}
+	s.mq.PublishRetained(msg.TimeTopic, msg.ModelTime{ModelTime: msg.FormatTime(now.Time), Factor: now.Factor})
 	d := now.Time.Sub(s.last)
 	if d == 0 {
 		return
@@ -155,7 +156,11 @@ func (s *sim) readInputs(ctx context.Context) {
 	for _, k := range s.keys {
 		levels[k.Level] = true
 	}
-	states := map[string]string{}
+	// The world feels whatever state the room's damper and radiator valve
+	// have reached, found by equipment type and room: physics doesn't need
+	// the registry to know which device is which.
+	airflow := rooms.Actuators[rooms.Damper].EquipmentType
+	radiator := rooms.Actuators[rooms.Heating].EquipmentType
 	for level := range levels {
 		eq, err := s.bs.Equipment(ctx, level)
 		if err != nil {
@@ -163,20 +168,23 @@ func (s *sim) readInputs(ctx context.Context) {
 			continue
 		}
 		for _, e := range eq {
-			for _, a := range e.Actuators {
-				states[a.ID] = a.State
+			k := rooms.Key{Level: e.Level, Name: e.Room}
+			in, ok := s.inputs[k]
+			if !ok || len(e.Actuators) == 0 {
+				continue
 			}
+			v, ok := parse(e.Actuators[0].State)
+			if !ok {
+				continue
+			}
+			switch e.Type {
+			case airflow:
+				in.AirflowLs = v
+			case radiator:
+				in.Setpoint = v
+			}
+			s.inputs[k] = in
 		}
-	}
-	for _, k := range s.keys {
-		in := s.inputs[k]
-		if v, ok := parse(states[rooms.ActuatorID(rooms.Damper, k)]); ok {
-			in.AirflowLs = v
-		}
-		if v, ok := parse(states[rooms.ActuatorID(rooms.Heating, k)]); ok {
-			in.Setpoint = v
-		}
-		s.inputs[k] = in
 	}
 }
 
@@ -224,7 +232,7 @@ func mustTrunc(s string) string {
 	return t.Truncate(time.Minute).Format(time.RFC3339)
 }
 
-// handleRooms serves IF-2. ?level= filters to one floor.
+// handleRooms serves IF-2. ?room= returns one room, ?level= one floor.
 func (s *sim) handleRooms(w http.ResponseWriter, r *http.Request) {
 	s.mu.RLock()
 	snap := s.snap
@@ -233,7 +241,14 @@ func (s *sim) handleRooms(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no model time yet", http.StatusServiceUnavailable)
 		return
 	}
-	if level := r.URL.Query().Get("level"); level != "" {
+	if room := r.URL.Query().Get("room"); room != "" {
+		v, ok := snap.Rooms[room]
+		if !ok {
+			http.Error(w, "room not simulated", http.StatusNotFound)
+			return
+		}
+		snap.Rooms = map[string]roomTruth{room: v}
+	} else if level := r.URL.Query().Get("level"); level != "" {
 		filtered := map[string]roomTruth{}
 		for key, v := range snap.Rooms {
 			if k, err := rooms.Parse(key); err == nil && k.Level == level {

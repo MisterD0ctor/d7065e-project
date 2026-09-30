@@ -1,17 +1,21 @@
-// Command sensor is a sensor gateway for one kind of sensor (KIND=co2, temp or
-// occupancy) in every configured room (D-2). It samples the truth from
-// physics (IF-2), adds noise and injected faults, writes the reading to
-// BuildSim (IF-3) and publishes it on MQTT (IF-4). It registers its equipment
-// at start, so a restart needs no manual steps (FR-11).
+// Command sensor is one sensor device (D-2). It knows only its own id and
+// what kind of hardware it is; at boot it checks in with the registry (IF-12)
+// to learn which room it was installed in, and does nothing until an
+// installer has registered it. Then, once per sample period, it samples its
+// room's truth from physics (IF-2), adds noise and any injected fault, writes
+// the reading to BuildSim (IF-3) and publishes it on MQTT (IF-4).
 package main
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"hash/fnv"
 	"log"
 	"math/rand/v2"
 	"net/http"
+	"net/url"
 	"os/signal"
 	"strconv"
 	"strings"
@@ -19,12 +23,17 @@ import (
 	"time"
 
 	"github.com/MisterD0ctor/d7065e-project/internal/buildsim"
+	"github.com/MisterD0ctor/d7065e-project/internal/devreg"
 	"github.com/MisterD0ctor/d7065e-project/internal/env"
 	"github.com/MisterD0ctor/d7065e-project/internal/faults"
 	"github.com/MisterD0ctor/d7065e-project/internal/mqttx"
 	"github.com/MisterD0ctor/d7065e-project/internal/msg"
+	"github.com/MisterD0ctor/d7065e-project/internal/registry"
 	"github.com/MisterD0ctor/d7065e-project/internal/rooms"
 )
+
+// CheckInEvery is the heartbeat to the registry; it also notices retirement.
+const CheckInEvery = 30 * time.Second
 
 type truth struct {
 	ModelTime string `json:"model_time"`
@@ -35,106 +44,124 @@ type truth struct {
 	} `json:"rooms"`
 }
 
-type gateway struct {
+type sensor struct {
+	id      string
 	kind    string
-	keys    []rooms.Key
+	room    rooms.Key
+	reg     *devreg.Client
 	bs      *buildsim.Client
+	mq      *mqttx.Client
 	physics string
 	http    *http.Client
 	sample  time.Duration
 	inject  *faults.Injector
 	rng     *rand.Rand
-	mq      *mqttx.Client
 	runID   string
-	last    time.Time // model time of the last published sample
+	last    time.Time // model time of the last reading
+	retired bool
 }
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	kind := env.Must("KIND")
-	if _, ok := rooms.Sensors[kind]; !ok {
-		log.Fatalf("KIND=%q: want co2, temp or occupancy", kind)
+	id := env.Must("DEVICE_ID")
+	kind := env.Must("DEVICE_KIND") // what the hardware is; the registry must agree
+	if !registry.IsSensor(kind) {
+		log.Fatalf("DEVICE_KIND=%q: want co2, temp or occupancy", kind)
 	}
-	keys, err := rooms.ParseList(env.Must("ROOMS"))
+	reg := devreg.New(env.String("REGISTRY_URL", "http://registry:8080"))
+	dev, err := reg.WaitForCommissioning(ctx, id, "")
 	if err != nil {
-		log.Fatal(err)
+		return
 	}
-	fs, err := faults.Parse(env.String("FAULTS", ""))
-	if err != nil {
-		log.Fatal(err)
+	if dev.Kind != kind {
+		// The installer typed the wrong kind for this id. Reporting CO₂ as a
+		// temperature would be worse than reporting nothing.
+		log.Fatalf("device %s is a %s sensor but is registered as %s; fix the registry entry", id, kind, dev.Kind)
 	}
-	seed := uint64(env.Float("SEED", 1))
-	g := &gateway{
+	room, _ := rooms.Parse(dev.Room)
+	log.Printf("device %s: %s sensor in %s", id, kind, room)
+
+	s := &sensor{
+		id:      id,
 		kind:    kind,
-		keys:    keys,
+		room:    room,
+		reg:     reg,
 		bs:      buildsim.New(env.String("BUILDSIM_URL", "http://buildsim:9090")),
+		mq:      mqttx.Connect(id),
 		physics: strings.TrimRight(env.String("PHYSICS_URL", "http://physics:8080"), "/"),
 		http:    &http.Client{Timeout: 500 * time.Millisecond},
 		sample:  time.Duration(env.Float("SAMPLE_S", 60) * float64(time.Second)),
-		inject:  faults.NewInjector(fs),
-		rng:     rand.New(rand.NewPCG(seed, uint64(len(kind)))),
-		mq:      mqttx.Connect("sensor-" + kind),
+		inject:  faults.NewInjector(fault(env.String("FAULT", ""), room)),
+		rng:     rand.New(rand.NewPCG(seed(id), uint64(env.Float("SEED", 1)))),
 		runID:   env.String("RUN_ID", "dev"),
 	}
-	for _, f := range fs {
-		log.Printf("fault injected: %s on %s", f.Mode, f.Room)
-	}
 
-	g.register(ctx)
 	tick := time.NewTicker(time.Second)
 	defer tick.Stop()
+	heartbeat := time.NewTicker(CheckInEvery)
+	defer heartbeat.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-heartbeat.C:
+			s.checkIn(ctx)
 		case <-tick.C:
-			g.tick(ctx)
+			if !s.retired {
+				s.tick(ctx)
+			}
 		}
 	}
 }
 
-// register creates this gateway's equipment, retrying until BuildSim answers.
-func (g *gateway) register(ctx context.Context) {
-	spec := rooms.Sensors[g.kind]
-	var eq []buildsim.Equipment
-	for _, k := range g.keys {
-		eq = append(eq, buildsim.Equipment{
-			ID:       rooms.EquipmentID(spec.EquipmentPrefix, k),
-			Name:     fmt.Sprintf("%s sensor %s", g.kind, k),
-			Type:     spec.EquipmentType,
-			Category: "sensor",
-			Level:    k.Level,
-			Room:     k.Name,
-			Status:   "running",
-			Sensors: []buildsim.Sensor{{
-				ID: rooms.SensorID(g.kind, k), Type: spec.SensorType,
-				DataType: "text", Unit: spec.Unit,
-			}},
-			Actuators: []buildsim.Actuator{},
-		})
+// fault turns FAULT (e.g. "stuck", "dropout", "drift:+50") into a fault on
+// this device's room.
+func fault(spec string, room rooms.Key) []faults.Fault {
+	if spec == "" {
+		return nil
 	}
-	for {
-		err := g.bs.BulkCreate(ctx, eq)
-		if err == nil {
-			log.Printf("registered %d %s sensors", len(eq), g.kind)
-			return
-		}
-		log.Printf("register: %v (retrying)", err)
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(2 * time.Second):
-		}
+	mode, rest, _ := strings.Cut(spec, ":")
+	full := mode + ":" + room.String()
+	if rest != "" {
+		full += ":" + rest
 	}
-}
-
-func (g *gateway) tick(ctx context.Context) {
-	tr, err := g.fetchTruth(ctx)
+	fs, err := faults.Parse(full)
 	if err != nil {
-		// No retry inside a sample: a gateway that can't see the air goes
-		// quiet, which is what a dead device looks like (IF-2).
+		log.Fatalf("FAULT=%q: %v", spec, err)
+	}
+	log.Printf("fault injected: %s", spec)
+	return fs
+}
+
+// seed gives every device its own noise stream, repeatable from run to run.
+func seed(id string) uint64 {
+	h := fnv.New64a()
+	h.Write([]byte(id))
+	return h.Sum64()
+}
+
+func (s *sensor) checkIn(ctx context.Context) {
+	_, err := s.reg.CheckIn(ctx, s.id, "")
+	switch {
+	case errors.Is(err, devreg.ErrRetired), errors.Is(err, devreg.ErrNotInstalled):
+		if !s.retired {
+			log.Printf("device %s was removed from the registry; no longer reporting", s.id)
+		}
+		s.retired = true
+	case err != nil:
+		log.Printf("check-in: %v", err) // keep reporting; the registry may be restarting
+	default:
+		s.retired = false
+	}
+}
+
+func (s *sensor) tick(ctx context.Context) {
+	tr, err := s.fetchTruth(ctx)
+	if err != nil {
+		// No retry inside a sample: a sensor that can't sense goes quiet,
+		// which is what a dead device looks like (IF-2).
 		log.Printf("truth: %v", err)
 		return
 	}
@@ -143,43 +170,42 @@ func (g *gateway) tick(ctx context.Context) {
 		log.Printf("truth: bad model_time %q", tr.ModelTime)
 		return
 	}
-	if !g.last.IsZero() && t.Sub(g.last) < g.sample && !t.Before(g.last) {
+	if !s.last.IsZero() && t.Sub(s.last) < s.sample && !t.Before(s.last) {
 		return
 	}
-	g.last = t
-	for _, k := range g.keys {
-		room, ok := tr.Rooms[k.String()]
-		if !ok {
-			log.Printf("%s: missing from physics", k)
-			continue
-		}
-		var v float64
-		switch g.kind {
-		case rooms.CO2:
-			v = room.CO2
-		case rooms.Temp:
-			v = room.Temp
-		case rooms.Occupancy:
-			v = float64(room.Occupancy)
-		}
-		v = faults.Noise(g.kind, v, g.rng)
-		v, publish := g.inject.Apply(k, t, v)
-		if !publish {
-			continue
-		}
-		value := format(g.kind, v)
-		g.write(ctx, k, value)
-		g.publish(k, t, value)
+	s.last = t
+	room, ok := tr.Rooms[s.room.String()]
+	if !ok {
+		log.Printf("%s: not simulated by physics", s.room)
+		return
 	}
+	var v float64
+	switch s.kind {
+	case rooms.CO2:
+		v = room.CO2
+	case rooms.Temp:
+		v = room.Temp
+	case rooms.Occupancy:
+		v = float64(room.Occupancy)
+	}
+	v = faults.Noise(s.kind, v, s.rng)
+	v, publish := s.inject.Apply(s.room, t, v)
+	if !publish {
+		return
+	}
+	value := format(s.kind, v)
+	s.write(ctx, value)
+	s.publish(t, value)
 }
 
-func (g *gateway) fetchTruth(ctx context.Context) (truth, error) {
+func (s *sensor) fetchTruth(ctx context.Context) (truth, error) {
 	var tr truth
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, g.physics+"/rooms", nil)
+	u := s.physics + "/rooms?room=" + url.QueryEscape(s.room.String())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return tr, err
 	}
-	resp, err := g.http.Do(req)
+	resp, err := s.http.Do(req)
 	if err != nil {
 		return tr, err
 	}
@@ -190,20 +216,21 @@ func (g *gateway) fetchTruth(ctx context.Context) (truth, error) {
 	return tr, json.NewDecoder(resp.Body).Decode(&tr)
 }
 
-// write retries ×3 with 100 ms backoff; a 404 means the equipment is gone, so
-// it re-registers first (IF-3).
-func (g *gateway) write(ctx context.Context, k rooms.Key, value string) {
-	id := rooms.SensorID(g.kind, k)
-	for attempt := range 3 {
-		err := g.bs.SetSensorValue(ctx, id, value)
+// write retries ×3 with 100 ms backoff (IF-3). A 404 means BuildSim has lost
+// the equipment, e.g. after a restart; the registry recreates it within its
+// sync period, so the next sample gets through.
+func (s *sensor) write(ctx context.Context, value string) {
+	id := registry.SensorID(s.id)
+	for attempt := 1; attempt <= 3; attempt++ {
+		err := s.bs.SetSensorValue(ctx, id, value)
 		if err == nil {
 			return
 		}
 		if buildsim.IsNotFound(err) {
-			log.Printf("%s: equipment missing, re-registering", id)
-			g.register(ctx)
+			log.Printf("%s: not in BuildSim yet; the registry will recreate it", id)
+			return
 		}
-		log.Printf("%s: write attempt %d: %v", id, attempt+1, err)
+		log.Printf("%s: write attempt %d: %v", id, attempt, err)
 		time.Sleep(100 * time.Millisecond)
 	}
 	log.Printf("%s: reading dropped", id)
@@ -211,15 +238,15 @@ func (g *gateway) write(ctx context.Context, k rooms.Key, value string) {
 
 // publish sends the same reading on MQTT, after the BuildSim write: if the
 // broker is down, BuildSim still has it for the fallback path (D-3).
-func (g *gateway) publish(k rooms.Key, t time.Time, value string) {
+func (s *sensor) publish(t time.Time, value string) {
 	v, _ := strconv.ParseFloat(value, 64)
-	g.mq.Publish(msg.ObsTopic(k, g.kind), msg.Observation{
-		RunID:     g.runID,
-		SensorID:  rooms.SensorID(g.kind, k),
-		Room:      k.String(),
-		Kind:      g.kind,
+	s.mq.Publish(msg.ObsTopic(s.room, s.kind), msg.Observation{
+		RunID:     s.runID,
+		SensorID:  s.id,
+		Room:      s.room.String(),
+		Kind:      s.kind,
 		Value:     v,
-		Unit:      rooms.Sensors[g.kind].Unit,
+		Unit:      rooms.Sensors[s.kind].Unit,
 		ModelTime: msg.FormatTime(t),
 		Seq:       t.Unix(),
 	})

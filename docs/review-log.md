@@ -4,6 +4,24 @@ Two things the oral exam asks about (Lecture 1, slide 55): where AI advice was
 wrong and how we caught it, and why the design looks the way it does. Add an
 entry whenever either happens. Newest first.
 
+## 2026-09-30: device registry, one process per device
+
+Design change (D-2, D-9, new D-10): the lecturer suggested a device database
+that an installer fills in. The gateways-per-kind design had no installer
+step at all; rooms came from `ROOMS` in `compose.yaml`. Now every device is
+its own container, knows only its id and kind, and learns its room from the
+registry. We chose one process per device over gateways for faithfulness to a
+real installation, accepting ~250 containers for 50 rooms.
+
+| Finding | How it was caught | Fix |
+|---|---|---|
+| Actuators advertised their container hostname, which other containers can't resolve on the compose network | Controller log: `no such host` for every command | `gendevices` sets `ADVERTISE_URL=http://<device id>:8080`, the service name |
+| The controller kept the old address until its 30 s registry refresh | Commands failed for up to 30 s after the damper restarted | A failed command triggers an immediate refresh (at most every 5 s) |
+| The SQLite driver needs Go 1.26; the image built with 1.25 | `go mod download` failed in the image build | Build image `golang:1.26-alpine` |
+| Sizing came out of the registry as `Design`, `AreaM2` (no JSON tags) | Reading `GET /devices` | JSON tags on `sizing.Room` |
+| Restarting one service without `RUN_ID` sent its records to run `dev`, so they looked lost | Heating decisions "missing" from the run | `RUN_ID` lives in `.env` for the whole stack |
+| T-17, T-28–T-30 pass: BuildSim restart restored all 5 devices in < 15 s; unregistered devices wait; a room typo (`level0/1507`) is rejected; a retired device stops at its next check-in | Manual runs | — |
+
 ## 2026-09-30: storage and MQTT
 
 | Finding | How it was caught | Fix |

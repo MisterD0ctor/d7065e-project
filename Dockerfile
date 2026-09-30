@@ -1,5 +1,5 @@
 # One image per service: docker compose passes the command to build as CMD.
-FROM golang:1.25-alpine AS build
+FROM golang:1.26-alpine AS build
 ARG CMD
 WORKDIR /src
 COPY go.mod go.sum ./

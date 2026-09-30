@@ -63,7 +63,13 @@ func (cl *Client) Up() bool { return cl.up.Load() }
 
 // Publish sends v as JSON. It doesn't wait for the broker: a lost message is
 // a gap in the record, not a reason to stall the control loop.
-func (cl *Client) Publish(topic string, v any) {
+func (cl *Client) Publish(topic string, v any) { cl.publish(topic, v, false) }
+
+// PublishRetained is for state a new subscriber needs at once, like the
+// model time: the broker hands the last value to anyone who subscribes.
+func (cl *Client) PublishRetained(topic string, v any) { cl.publish(topic, v, true) }
+
+func (cl *Client) publish(topic string, v any, retained bool) {
 	if !cl.Up() {
 		return
 	}
@@ -72,7 +78,7 @@ func (cl *Client) Publish(topic string, v any) {
 		log.Printf("mqtt: marshal for %s: %v", topic, err)
 		return
 	}
-	cl.c.Publish(topic, qos, false, b)
+	cl.c.Publish(topic, qos, retained, b)
 }
 
 // Subscribe registers a handler; it is re-subscribed after every reconnect.

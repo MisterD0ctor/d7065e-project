@@ -1,9 +1,9 @@
-// Command controller decides the airflow per room from the sensor readings
-// and commands the damper actuator (FR-3). It takes the CO₂ observations from
-// MQTT (IF-4) and falls back to polling BuildSim when the broker is down or
-// silent (D-3). Each decision is published for storage and viz (IF-6). This
-// version has the constant and reactive policies (FR-9); prediction comes
-// later.
+// Command controller decides the airflow and heating setpoint per room (FR-3).
+// It learns the building from the registry: which rooms have a CO₂ sensor and
+// a damper, where to reach each actuator, and each room's sizing (IF-12). It
+// takes the observations from MQTT (IF-4) and falls back to polling BuildSim
+// when the broker is silent (D-3). Each decision is published for storage and
+// viz (IF-6). This version has the constant and reactive policies (FR-9).
 package main
 
 import (
@@ -17,48 +17,62 @@ import (
 	"net/http"
 	"os/signal"
 	"strconv"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/MisterD0ctor/d7065e-project/internal/actuator"
 	"github.com/MisterD0ctor/d7065e-project/internal/buildsim"
-	"github.com/MisterD0ctor/d7065e-project/internal/clock"
+	"github.com/MisterD0ctor/d7065e-project/internal/devreg"
 	"github.com/MisterD0ctor/d7065e-project/internal/env"
 	"github.com/MisterD0ctor/d7065e-project/internal/mqttx"
 	"github.com/MisterD0ctor/d7065e-project/internal/msg"
+	"github.com/MisterD0ctor/d7065e-project/internal/registry"
 	"github.com/MisterD0ctor/d7065e-project/internal/rooms"
-	"github.com/MisterD0ctor/d7065e-project/internal/site"
 	"github.com/MisterD0ctor/d7065e-project/internal/sizing"
 )
 
-// Reactive control: airflow rises linearly from the lowest allowed flow at
-// ReactiveLow ppm to maximum at ReactiveHigh ppm.
 const (
+	// Reactive ventilation: airflow rises linearly from the lowest allowed
+	// flow at ReactiveLow ppm to maximum at ReactiveHigh ppm.
 	ReactiveLow  = 600.0
 	ReactiveHigh = 1000.0
+
+	// Heating: comfort setpoint in occupied hours, setback otherwise.
+	ComfortSetpoint = 21.0
+	SetbackSetpoint = 18.0
+
 	CommandTTL   = 300 // model seconds: five missed readings
 	StaleAfter   = 180 * time.Second
+	RefreshPlant = 30 * time.Second // how often to re-read the registry
 )
+
+// plant is what is installed in one room.
+type plant struct {
+	size       sizing.Room
+	damper     string   // endpoint; "" = none installed or not checked in
+	heating    string   // endpoint
+	co2Sensors []string // device ids
+	tempSens   []string
+}
 
 type controller struct {
 	policy string
-	keys   map[rooms.Key]bool
-	sizes  map[rooms.Key]sizing.Room
+	reg    *devreg.Client
 	bs     *buildsim.Client
 	mq     *mqttx.Client
-	damper string
 	http   *http.Client
 	runID  string
 	dedup  *mqttx.Dedup
 
 	silence mqttx.Silence // when to stop waiting for MQTT and poll BuildSim
 
-	mu       sync.Mutex
-	newest   time.Time               // newest model time seen on any observation
-	polled   map[rooms.Key]time.Time // BuildSim timestamp of the last polled reading acted on
-	fallback bool
+	mu          sync.Mutex
+	lastRefresh time.Time // real time of the last registry read
+	plants      map[rooms.Key]plant
+	newest      time.Time            // newest model time seen on any observation
+	polled      map[string]time.Time // BuildSim timestamp of the last polled reading acted on, by device
+	fallback    bool
 }
 
 func main() {
@@ -69,45 +83,81 @@ func main() {
 	if policy != "reactive" && policy != "constant" {
 		log.Fatalf("POLICY=%q: want constant or reactive", policy)
 	}
-	keys, err := rooms.ParseList(env.Must("ROOMS"))
-	if err != nil {
-		log.Fatal(err)
-	}
-	bs := buildsim.New(env.String("BUILDSIM_URL", "http://buildsim:9090"))
-	// occupancysim is read once, for room capacities; the controller never
-	// reads its clock or its occupancy.
-	sizes, err := site.Sizes(ctx, bs, clock.New(env.String("CLOCK_URL", "http://occupancysim:8081")), keys)
-	if err != nil {
-		log.Fatal(err)
-	}
 	c := &controller{
 		policy: policy,
-		keys:   map[rooms.Key]bool{},
-		sizes:  sizes,
-		bs:     bs,
+		reg:    devreg.New(env.String("REGISTRY_URL", "http://registry:8080")),
+		bs:     buildsim.New(env.String("BUILDSIM_URL", "http://buildsim:9090")),
 		mq:     mqttx.Connect("controller"),
-		damper: strings.TrimRight(env.String("DAMPER_URL", "http://actuator-damper:8080"), "/"),
 		http:   &http.Client{Timeout: 500 * time.Millisecond},
 		runID:  env.String("RUN_ID", "dev"),
 		dedup:  mqttx.NewDedup(),
-		polled: map[rooms.Key]time.Time{},
+		plants: map[rooms.Key]plant{},
+		polled: map[string]time.Time{},
 	}
-	for _, k := range keys {
-		c.keys[k] = true
-	}
-	c.mq.Subscribe("obs/+/+/"+rooms.CO2, func(_ string, payload []byte) { c.onObservation(ctx, payload) })
-	log.Printf("policy %s for %d rooms", policy, len(keys))
+	c.refreshPlants(ctx)
+	c.mq.Subscribe("obs/+/+/"+rooms.CO2, func(_ string, p []byte) { c.onObservation(ctx, p) })
+	c.mq.Subscribe("obs/+/+/"+rooms.Temp, func(_ string, p []byte) { c.onObservation(ctx, p) })
+	log.Printf("policy %s", policy)
 
 	tick := time.NewTicker(time.Second)
 	defer tick.Stop()
+	refresh := time.NewTicker(RefreshPlant)
+	defer refresh.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-refresh.C:
+			c.refreshPlants(ctx)
 		case <-tick.C:
 			c.pollIfSilent(ctx)
 		}
 	}
+}
+
+// refreshPlants rebuilds the room list from the registry. A registry outage
+// keeps the last known plant: the controller doesn't forget the building.
+func (c *controller) refreshPlants(ctx context.Context) {
+	devs, err := c.reg.List(ctx, registry.Filter{Status: "active"})
+	if err != nil {
+		log.Printf("registry: %v (keeping %d known rooms)", err, len(c.plants))
+		return
+	}
+	plants := map[rooms.Key]plant{}
+	for _, d := range devs {
+		k, err := rooms.Parse(d.Room)
+		if err != nil {
+			continue
+		}
+		p := plants[k]
+		p.size = d.Size
+		switch d.Kind {
+		case rooms.Damper:
+			p.damper = d.Endpoint
+		case rooms.Heating:
+			p.heating = d.Endpoint
+		case rooms.CO2:
+			p.co2Sensors = append(p.co2Sensors, d.ID)
+		case rooms.Temp:
+			p.tempSens = append(p.tempSens, d.ID)
+		}
+		plants[k] = p
+	}
+	c.mu.Lock()
+	changed := len(plants) != len(c.plants)
+	c.plants = plants
+	c.lastRefresh = time.Now()
+	c.mu.Unlock()
+	if changed {
+		log.Printf("controlling %d rooms", len(plants))
+	}
+}
+
+func (c *controller) plant(k rooms.Key) (plant, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	p, ok := c.plants[k]
+	return p, ok
 }
 
 func (c *controller) onObservation(ctx context.Context, payload []byte) {
@@ -117,15 +167,15 @@ func (c *controller) onObservation(ctx context.Context, payload []byte) {
 		return
 	}
 	k, err := rooms.Parse(o.Room)
-	if err != nil || !c.keys[k] || !c.dedup.Fresh(o.SensorID, o.Seq) {
+	if err != nil || !c.dedup.Fresh(o.SensorID, o.Seq) {
 		return
 	}
 	t, err := time.Parse(time.RFC3339, o.ModelTime)
 	if err != nil {
 		return
 	}
-
 	c.silence.Arrived(time.Now())
+
 	c.mu.Lock()
 	if c.fallback {
 		log.Printf("observations back on MQTT; stopped polling BuildSim")
@@ -137,15 +187,16 @@ func (c *controller) onObservation(ctx context.Context, payload []byte) {
 	stale := c.newest.Sub(t) > StaleAfter
 	c.mu.Unlock()
 	if stale {
-		log.Printf("%s: dropping stale reading from %s", k, o.ModelTime)
+		log.Printf("%s: dropping stale %s reading from %s", k, o.Kind, o.ModelTime)
 		return
 	}
-	c.act(ctx, k, o.Value, o.ModelTime)
+	c.act(ctx, k, o.Kind, o.Value, t, o.ModelTime)
 }
 
-// pollIfSilent is the fallback path: with the broker down or silent, read
-// the CO₂ sensors from BuildSim and act on readings not seen before. BuildSim
-// has no model time, so these commands carry no issued_at (IF-8).
+// pollIfSilent is the fallback path: with the broker down or silent, read the
+// sensors from BuildSim and act on readings not seen before. BuildSim has no
+// model time, so these commands carry no issued_at, and the heating rule uses
+// the last model time seen (IF-8).
 func (c *controller) pollIfSilent(ctx context.Context) {
 	silent := c.silence.Silent(time.Now())
 	c.mu.Lock()
@@ -153,95 +204,89 @@ func (c *controller) pollIfSilent(ctx context.Context) {
 		log.Printf("observations on MQTT stopped; polling BuildSim")
 		c.fallback = true
 	}
+	plants := make(map[rooms.Key]plant, len(c.plants))
+	for k, p := range c.plants {
+		plants[k] = p
+	}
+	last := c.newest
 	c.mu.Unlock()
 	if !silent {
 		return
 	}
-	readings, err := c.readCO2(ctx)
-	if err != nil {
-		log.Printf("read sensors: %v", err)
-		return
-	}
-	for k, r := range readings {
-		c.mu.Lock()
-		isNew := r.at.After(c.polled[k])
-		c.polled[k] = r.at
-		c.mu.Unlock()
-		if isNew {
-			c.act(ctx, k, r.co2, "")
-		}
-	}
-}
-
-type reading struct {
-	co2 float64
-	at  time.Time
-}
-
-func (c *controller) readCO2(ctx context.Context) (map[rooms.Key]reading, error) {
-	want := map[string]rooms.Key{}
-	levels := map[string]bool{}
-	for k := range c.keys {
-		want[rooms.SensorID(rooms.CO2, k)] = k
-		levels[k.Level] = true
-	}
-	out := map[rooms.Key]reading{}
-	for level := range levels {
-		eq, err := c.bs.Equipment(ctx, level)
-		if err != nil {
-			return nil, err
-		}
-		for _, e := range eq {
-			for _, s := range e.Sensors {
-				k, ok := want[s.ID]
-				if !ok || s.Value == "" {
+	for k, p := range plants {
+		for kind, ids := range map[string][]string{rooms.CO2: p.co2Sensors, rooms.Temp: p.tempSens} {
+			for _, id := range ids {
+				s, err := c.bs.SensorValue(ctx, registry.SensorID(id))
+				if err != nil || s.Value == "" {
 					continue
 				}
 				v, err := strconv.ParseFloat(s.Value, 64)
 				if err != nil {
-					log.Printf("%s: unparsable reading %q", s.ID, s.Value)
 					continue
 				}
-				out[k] = reading{co2: v, at: s.Timestamp}
+				c.mu.Lock()
+				isNew := s.Timestamp.After(c.polled[id])
+				c.polled[id] = s.Timestamp
+				c.mu.Unlock()
+				if isNew {
+					c.act(ctx, k, kind, v, last, "")
+				}
 			}
 		}
 	}
-	return out, nil
 }
 
-// act decides and commands one room. A room whose sensor goes quiet gets no
-// commands, so its damper's TTL expires and it falls back to design flow:
-// the degraded mode for missing CO₂ (FR-7) needs nothing from the controller.
-func (c *controller) act(ctx context.Context, k rooms.Key, co2 float64, modelTime string) {
-	cmd := actuator.Command{
-		CmdID:    newID(),
-		Value:    c.decide(k, co2),
-		Unit:     "l/s",
-		IssuedAt: modelTime,
-		TTLs:     CommandTTL,
-		Reason:   fmt.Sprintf("%s: CO₂ %.0f ppm", c.policy, co2),
+// act decides and commands one room for one reading. A room whose sensor goes
+// quiet gets no commands, so its actuator's TTL expires and it falls back to
+// design flow or 21 °C: the degraded mode for a missing sensor (FR-7) needs
+// nothing from the controller.
+func (c *controller) act(ctx context.Context, k rooms.Key, kind string, value float64, t time.Time, modelTime string) {
+	p, ok := c.plant(k)
+	if !ok {
+		return // a room with sensors but nothing registered to control
 	}
-	status, res := c.command(ctx, k, cmd)
-	c.mq.Publish(msg.DecisionTopic(k), msg.Decision{
-		RunID:         c.runID,
-		Room:          k.String(),
-		ModelTime:     modelTime,
-		Policy:        c.policy,
-		Mode:          "normal",
-		Observed:      map[string]float64{rooms.CO2: co2},
-		AirflowTarget: cmd.Value,
-		CmdID:         cmd.CmdID,
-		Status:        status,
-		AppliedTarget: res.Target,
-		Clamped:       res.Clamped,
-		Reason:        cmd.Reason,
-	})
+	var endpoint, unit, reason string
+	var target float64
+	switch kind {
+	case rooms.CO2:
+		endpoint, unit = p.damper, "l/s"
+		target = c.airflow(p.size, value)
+		reason = fmt.Sprintf("%s: CO₂ %.0f ppm", c.policy, value)
+	case rooms.Temp:
+		endpoint, unit = p.heating, "°C"
+		target = SetbackSetpoint
+		if sizing.OccupiedHours(t) {
+			target = ComfortSetpoint
+		}
+		reason = fmt.Sprintf("schedule: %.1f °C measured", value)
+	default:
+		return
+	}
+	if endpoint == "" {
+		return // actuator not installed or not checked in yet
+	}
+	cmd := actuator.Command{
+		CmdID: newID(), Value: target, Unit: unit,
+		IssuedAt: modelTime, TTLs: CommandTTL, Reason: reason,
+	}
+	status, res := c.command(ctx, endpoint, k, cmd)
+	d := msg.Decision{
+		RunID: c.runID, Room: k.String(), ModelTime: modelTime, Policy: c.policy,
+		Mode: "normal", Observed: map[string]float64{kind: value},
+		CmdID: cmd.CmdID, Status: status, AppliedTarget: res.Target,
+		Clamped: res.Clamped, Reason: reason,
+	}
+	if kind == rooms.CO2 {
+		d.AirflowTarget = &cmd.Value
+	} else {
+		d.SetpointTarget = &cmd.Value
+	}
+	c.mq.Publish(msg.DecisionTopic(k), d)
 }
 
-// decide proposes an airflow. It asks for as little as the policy wants and
+// airflow proposes a flow. It asks for as little as the policy wants and
 // leaves the floors and the CO₂ override to the actuator (D-6).
-func (c *controller) decide(k rooms.Key, co2 float64) float64 {
-	size := c.sizes[k]
+func (c *controller) airflow(size sizing.Room, co2 float64) float64 {
 	if c.policy == "constant" {
 		return size.Design
 	}
@@ -251,9 +296,9 @@ func (c *controller) decide(k rooms.Key, co2 float64) float64 {
 
 // command sends one command, retrying the same cmd_id so a lost reply can't
 // apply it twice (IF-8). Status 0 means every attempt failed.
-func (c *controller) command(ctx context.Context, k rooms.Key, cmd actuator.Command) (int, actuator.Result) {
+func (c *controller) command(ctx context.Context, endpoint string, k rooms.Key, cmd actuator.Command) (int, actuator.Result) {
 	body, _ := json.Marshal(cmd)
-	url := fmt.Sprintf("%s/rooms/%s/%s/command", c.damper, k.Level, k.Name)
+	url := fmt.Sprintf("%s/rooms/%s/%s/command", endpoint, k.Level, k.Name)
 	for attempt := 1; attempt <= 3; attempt++ {
 		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -275,6 +320,14 @@ func (c *controller) command(ctx context.Context, k rooms.Key, cmd actuator.Comm
 		return resp.StatusCode, res
 	}
 	log.Printf("%s: command %s gave up after 3 attempts", k, cmd.CmdID)
+	// The actuator may have restarted somewhere else: ask the registry now
+	// instead of at the next periodic refresh, at most every 5 s.
+	c.mu.Lock()
+	due := time.Since(c.lastRefresh) > 5*time.Second
+	c.mu.Unlock()
+	if due {
+		c.refreshPlants(ctx)
+	}
 	return 0, actuator.Result{}
 }
 

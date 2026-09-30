@@ -46,7 +46,8 @@ type Decision struct {
 	Mode               string             `json:"mode"`
 	Observed           map[string]float64 `json:"observed"`
 	PredictedOccupancy *float64           `json:"predicted_occupancy,omitempty"`
-	AirflowTarget      float64            `json:"airflow_target_ls"`
+	AirflowTarget      *float64           `json:"airflow_target_ls,omitempty"`
+	SetpointTarget     *float64           `json:"setpoint_target_c,omitempty"`
 	CmdID              string             `json:"cmd_id"`
 	Status             int                `json:"status"`
 	AppliedTarget      float64            `json:"applied_target"`
@@ -64,6 +65,16 @@ type Event struct {
 	Kind      string `json:"kind"`
 	Detail    string `json:"detail"`
 }
+
+// ModelTime is the current model time, published by physics every tick on
+// TimeTopic (retained), the way a building network distributes time to its
+// devices. It saves every actuator from polling occupancysim.
+type ModelTime struct {
+	ModelTime string  `json:"model_time"`
+	Factor    float64 `json:"factor"`
+}
+
+const TimeTopic = "time/model"
 
 func ObsTopic(k rooms.Key, kind string) string {
 	return fmt.Sprintf("obs/%s/%s/%s", k.Level, k.Name, kind)

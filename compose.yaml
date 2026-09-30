@@ -35,8 +35,9 @@ services:
 
   # ---- Ventilation Control ----
   # One Dockerfile builds every service; CMD picks the ./cmd/<name> to build.
-  # ROOMS lists the rooms as <level>/<room>. RUN_ID tags every record, so
-  # set a new one per experiment: RUN_ID=reactive-s1 docker compose up -d
+  # The devices (one container each) are in compose.devices.yaml, which .env
+  # adds through COMPOSE_FILE. RUN_ID tags every record, so set a new one per
+  # experiment: RUN_ID=reactive-s1 docker compose up -d
   #
   # MQTT passwords are plain text here on purpose: this is a local lab stack.
   # The broker's ACL (deploy/mosquitto/acl) is what keeps the truth away from
@@ -73,8 +74,8 @@ services:
 
   physics:
     build: { context: ., args: { CMD: physics } }
-    environment: &common
-      ROOMS: level0/1570   # a fika room: breaks around 09:45 and 14:30
+    environment:
+      ROOMS: level0/1570   # the simulated rooms; compose.devices.yaml sets them
       RUN_ID: ${RUN_ID:-dev}
       BUILDSIM_URL: http://buildsim:9090
       CLOCK_URL: http://occupancysim:8081
@@ -86,39 +87,44 @@ services:
       occupancysim: { condition: service_started }
     restart: unless-stopped
 
-  sensor-co2:
-    build: { context: ., args: { CMD: sensor } }
+  registry:
+    build: { context: ., args: { CMD: registry } }
     environment:
-      <<: *common
-      KIND: co2
-      PHYSICS_URL: http://physics:8080
-      MQTT_USER: sensor
-      MQTT_PASS: sensor-pw
-      FAULTS: ""   # e.g. "stuck:level0/1570" or "drift:level0/1570:+50"
-    depends_on: [physics]
-    restart: unless-stopped
-
-  actuator-damper:
-    build: { context: ., args: { CMD: actuator } }
-    environment:
-      <<: *common
-      KIND: damper
-      MQTT_USER: actuator
-      MQTT_PASS: actuator-pw
+      DB_PATH: /data/registry.db
+      BUILDSIM_URL: http://buildsim:9090
+      CLOCK_URL: http://occupancysim:8081
+    volumes:
+      - registry-data:/data
+    ports:
+      - "127.0.0.1:8070:8080"   # installer's form and API
     depends_on:
       buildsim: { condition: service_healthy }
     restart: unless-stopped
 
+  # The device images. These two only build; the devices themselves are one
+  # container each, generated into compose.devices.yaml by cmd/gendevices.
+  sensor-image:
+    build: { context: ., args: { CMD: sensor } }
+    image: d7065e/sensor
+    scale: 0
+  actuator-image:
+    build: { context: ., args: { CMD: actuator } }
+    image: d7065e/actuator
+    scale: 0
+
   controller:
     build: { context: ., args: { CMD: controller } }
     environment:
-      <<: *common
+      RUN_ID: ${RUN_ID:-dev}
       POLICY: ${POLICY:-reactive}   # constant | reactive
-      DAMPER_URL: http://actuator-damper:8080
+      REGISTRY_URL: http://registry:8080
+      BUILDSIM_URL: http://buildsim:9090
+      MQTT_URL: tcp://mosquitto:1883
       MQTT_USER: controller
       MQTT_PASS: controller-pw
-    depends_on: [actuator-damper]
+    depends_on: [registry]
     restart: unless-stopped
 
 volumes:
   storage-data:
+  registry-data:

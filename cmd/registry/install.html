@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Device registry</title>
+<style>
+  :root { --bg:#f6f7f9; --fg:#1b1f24; --muted:#5b6470; --line:#d9dde3; --card:#fff; --accent:#1f5fbf; --on-accent:#fff; --ok:#1e7a3c; --err:#b3261e; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#14171b; --fg:#e7eaee; --muted:#9aa3ad; --line:#2c323a; --card:#1b1f24; --accent:#6ea2ff; --on-accent:#0b1a33; --ok:#5cc47f; --err:#ff8a80; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.45 system-ui, sans-serif; }
+  main { max-width: 900px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 1.4rem; margin: 0 0 4px; }
+  p.lead { color: var(--muted); margin: 0 0 20px; }
+  form, section { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 16px; }
+  form { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; align-items: end; margin-bottom: 20px; }
+  label { display: grid; gap: 4px; font-size: .85rem; color: var(--muted); }
+  input, select, button { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); }
+  button { background: var(--accent); border-color: var(--accent); color: var(--on-accent); cursor: pointer; }
+  #result { grid-column: 1 / -1; min-height: 1.4em; margin: 0; }
+  .ok { color: var(--ok); } .err { color: var(--err); }
+  table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; }
+  .scroll { overflow-x: auto; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Device registry</h1>
+  <p class="lead">Record each device as you install it. The device finds its room here when it starts.</p>
+
+  <form id="install">
+    <label>Device id (serial on the label)
+      <input name="id" required pattern="[A-Za-z0-9][A-Za-z0-9_\-]{0,63}" placeholder="co2-0001">
+    </label>
+    <label>Kind
+      <select name="kind" required>
+        <option value="co2">CO₂ sensor</option>
+        <option value="temp">Temperature sensor</option>
+        <option value="occupancy">People counter</option>
+        <option value="damper">Ventilation damper</option>
+        <option value="heating">Radiator valve</option>
+      </select>
+    </label>
+    <label>Room (level/room)
+      <input name="room" required placeholder="level0/1570">
+    </label>
+    <label>Installed by
+      <input name="installed_by" required placeholder="your name">
+    </label>
+    <button type="submit">Register device</button>
+    <p id="result" role="status"></p>
+  </form>
+
+  <section>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Id</th><th>Kind</th><th>Room</th><th>Status</th><th>Last seen</th><th>Installed by</th></tr></thead>
+        <tbody id="devices"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+<script>
+const form = document.getElementById('install');
+const result = document.getElementById('result');
+
+async function load() {
+  const res = await fetch('devices');
+  const devices = await res.json();
+  const rows = devices.map(d => {
+    const tr = document.createElement('tr');
+    for (const v of [d.id, d.kind, d.room, d.status, d.last_seen || 'never', d.installed_by]) {
+      const td = document.createElement('td');
+      td.textContent = v;
+      tr.appendChild(td);
+    }
+    return tr;
+  });
+  document.getElementById('devices').replaceChildren(...rows);
+}
+
+form.addEventListener('submit', async e => {
+  e.preventDefault();
+  const body = Object.fromEntries(new FormData(form));
+  const res = await fetch('devices', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const data = await res.json();
+  result.className = res.ok ? 'ok' : 'err';
+  result.textContent = res.ok ? `Registered ${data.id} in ${data.room}.` : data.error;
+  if (res.ok) { form.id.value = ''; load(); }
+});
+
+load();
+setInterval(load, 10000);
+</script>
+</body>
+</html>

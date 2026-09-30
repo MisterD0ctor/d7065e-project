@@ -1,0 +1,6 @@
+id,kind,room
+co2-0001,co2,level0/1570
+temp-0001,temp,level0/1570
+occ-0001,occupancy,level0/1570
+damper-0001,damper,level0/1570
+heat-0001,heating,level0/1570

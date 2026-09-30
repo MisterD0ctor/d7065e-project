@@ -19,17 +19,18 @@ Overview:
 
 | ID | Interface | Owner (writer) | Readers | Protocol |
 |---|---|---|---|---|
-| IF-1 | Model clock | occupancysim | physics, actuators | REST |
-| IF-2 | Truth API | physics | sensor gateways only | REST |
-| IF-3 | Sensor readings in BuildSim | one gateway per kind | controller (fallback), viewer | REST |
-| IF-4 | Observations `obs/…` | one gateway per kind | controller, damper actuator, storage, viz | MQTT |
+| IF-1 | Model clock | occupancysim; physics relays it on `time/model` | physics (REST); actuators (MQTT, REST fallback) | REST, MQTT |
+| IF-2 | Truth API | physics | sensor devices only | REST |
+| IF-3 | Sensor readings in BuildSim | each sensor device | controller and damper (fallback), viewer | REST |
+| IF-4 | Observations `obs/…` | each sensor device | controller, damper, storage, viz | MQTT |
 | IF-5 | Truth `truth/…` | physics | storage only | MQTT |
 | IF-6 | Decisions `decision/…` | controller | storage, viz | MQTT |
 | IF-7 | Actuator events `event/…` | actuators | storage, viz | MQTT |
 | IF-8 | Actuator command | controller | actuators | REST |
-| IF-9 | Actuator state in BuildSim | one actuator per kind | physics, viewer | REST |
+| IF-9 | Actuator state in BuildSim | each actuator device | physics, viewer | REST |
 | IF-10 | Storage API | storage | controller, train, oracle, people | REST |
 | IF-11 | Room layers and alerts | viz | viewer | REST |
+| IF-12 | Device registry | registry | installer, devices, controller | REST |
 
 ---
 
@@ -39,12 +40,18 @@ Overview:
 (`time`, `minute_of_day`, `weekday`, `weekend`, `factor`, `running`).
 
 The same response lists `.sim.rooms[]` with each room's role and `capacity`.
-Physics, the actuators and the controller read the capacities **once at
-start** to size the ventilation, because occupancysim decides which rooms are
-fika rooms (4 m² per person) and which are lecture rooms (2 m²). Without
-occupancysim they estimate the capacity from the area.
+Physics and the registry read the capacities **once** to size the ventilation,
+because occupancysim decides which rooms are fika rooms (4 m² per person) and
+which are lecture rooms (2 m²). The registry stores the sizing with the room
+at installation, and devices and the controller get it from there (IF-12).
+Without occupancysim the capacity is estimated from the area.
 
-- **Rate:** physics reads it every tick (1 s real); actuators every tick too.
+Physics relays the time on MQTT every tick, as a retained message on
+`time/model` (`{"model_time": "…", "factor": 60}`), the way a building network
+distributes time. The actuators use that instead of each polling
+occupancysim, and poll occupancysim only while the relay is silent.
+
+- **Rate:** physics reads it every tick (1 s real).
 - **Stale:** if the clock doesn't advance for 10 s real while `running` is
   true, physics stops stepping and logs it. It never extrapolates.
 - **On failure:** timeout 500 ms. Physics holds its state and retries next
@@ -79,23 +86,25 @@ occupancysim they estimate the capacity from the area.
 
 ## IF-3. Sensor readings in BuildSim
 
-Equipment registered by each gateway at start, with `POST /api/equipment/bulk`
-(it skips ids that exist, so re-registration after a crash is safe; FR-11):
+The registry registers each installed device's equipment (IF-12) and
+re-registers it every 10 s (`POST /api/equipment/bulk` skips ids that exist),
+which restores everything after a BuildSim restart (FR-11). The equipment id
+is the device id the installer entered; the sensor inside gets a suffix:
 
-| Kind | Equipment id | `type` | Sensor id | Unit | Value format |
+| Kind | Equipment id (example) | `type` | Sensor id | Unit | Value format |
 |---|---|---|---|---|---|
-| CO₂ | `co2-level0-A109` | `co2_sensor` | `level0-A109-co2` | ppm | integer, `"612"` |
-| Temperature | `temp-level0-A109` | `temperature_sensor` | `level0-A109-temp` | °C | one decimal, `"21.3"` |
-| Occupancy | `occ-level0-A109` | `occupancy_counter` | `level0-A109-occ` | persons | integer, `"6"` |
+| CO₂ | `co2-0001` | `co2_sensor` | `co2-0001-reading` | ppm | integer, `"612"` |
+| Temperature | `temp-0001` | `temperature_sensor` | `temp-0001-reading` | °C | one decimal, `"21.3"` |
+| Occupancy | `occ-0001` | `occupancy_counter` | `occ-0001-reading` | persons | integer, `"6"` |
 
 `PUT /api/sensors/{sensor_id}/value` with `{"data_type": "text", "value": "612"}`.
 
 - **Rate:** one write per sensor per sample (60 model-s).
 - **Stale:** BuildSim stamps wall time. A reader using this fallback converts
   with the clock `factor`: older than 3 samples (180 model-s) is stale (FR-7).
-- **On failure:** retry ×3 with 100 ms backoff, then drop the reading and count
-  it in the gateway's log. A `404` means the equipment is gone: re-register,
-  then retry once.
+- **On failure:** retry ×3 with 100 ms backoff, then drop the reading and log
+  it. A `404` means BuildSim has lost the equipment; the registry recreates it
+  within 10 s, so the device just drops that one reading.
 
 ## IF-4. Observations `obs/<level>/<room>/<kind>`
 
@@ -224,12 +233,12 @@ Published on every change, not every tick.
 
 ## IF-9. Actuator state in BuildSim
 
-Registered by each actuator at start, like IF-3:
+Registered by the registry, like IF-3:
 
-| Kind | Equipment id | `type` | Actuator id | State format |
+| Kind | Equipment id (example) | `type` | Actuator id | State format |
 |---|---|---|---|---|
-| Damper | `vent-level0-A109` | `ventilation_fan` | `level0-A109-airflow` | l/s, one decimal |
-| Heating | `heat-level0-A109` | `radiator` | `level0-A109-setpoint` | °C, one decimal |
+| Damper | `damper-0001` | `ventilation_fan` | `damper-0001-state` | l/s, one decimal |
+| Heating | `heat-0001` | `radiator` | `heat-0001-state` | °C, one decimal |
 
 `PUT /api/actuators/{actuator_id}/state` with `{"state": "180.0"}`.
 
@@ -238,7 +247,9 @@ Registered by each actuator at start, like IF-3:
   has *reached*, not the target.
 - **Rate:** every 10 model-s while moving, then only on change.
 - **Physics side:** reads all states with one `GET /api/equipment?level=level0`
-  per tick. Missing or unparsable state → keep the last value and log it.
+  per tick and finds each room's damper and valve by equipment `type` and
+  room, so physics doesn't need the registry. Missing or unparsable state →
+  keep the last value.
 
 ## IF-10. Storage API
 
@@ -293,3 +304,41 @@ Model format (the per-room time-of-day profile, FR-4):
 `PUT /api/alerts`, at most 100: one per room in a degraded mode (`warning`),
 one per active CO₂ override (`critical`). Alerts are the current picture only;
 storage is the audit trail.
+
+## IF-12. Device registry
+
+The installer's record of what is installed where (D-10). Published on
+`127.0.0.1:8070`; the web form for installers is at `/`.
+
+| Call | Who | Returns |
+|---|---|---|
+| `POST /devices {id, kind, room, installed_by}` | installer | `201` + the device. `409` if the id is taken, `422` if the kind is unknown, the id has characters other than letters, digits, `-` and `_`, or the room is not in the floor plan |
+| `GET /devices?kind=&room=&status=` | controller, people | The matching devices |
+| `GET /devices/{id}` | anyone | One device, or `404` |
+| `DELETE /devices/{id}` | installer | Retires it (`204`); it stays in the database, and its equipment is removed from BuildSim |
+| `PUT /devices/{id}/checkin {endpoint}` | the device itself | `200` + its record (room and sizing); `404` not installed; `410` retired |
+
+A device record:
+
+```json
+{
+  "id": "damper-0001", "kind": "damper", "room": "level0/1570",
+  "status": "active", "installed_at": "2026-09-30T18:17:41Z", "installed_by": "kasper",
+  "endpoint": "http://damper-0001:8080", "last_seen": "2026-09-30T18:21:12Z",
+  "size": {"area_m2": 101.2, "volume_m3": 273.2, "capacity": 25,
+           "design_ls": 210.4, "max_ls": 315.6, "occupied_min_ls": 35.4, "empty_min_ls": 10.1}
+}
+```
+
+- **Boot:** a device checks in every 5 s until it gets `200`. Until then it
+  publishes nothing and accepts no commands: it doesn't know its room.
+- **Kind check:** a device whose hardware kind differs from the registered kind
+  refuses to start, so a mistyped kind can't make a CO₂ sensor report as a
+  thermometer.
+- **Heartbeat:** every 30 s real. `last_seen` shows dead devices; a `404` or
+  `410` stops the device reporting.
+- **Addresses:** actuators advertise `endpoint` at check-in. The controller
+  re-reads the registry every 30 s, and at once (at most every 5 s) when a
+  command fails, so a moved actuator is found quickly.
+- **On failure:** running devices keep working without the registry; only
+  starting devices and the controller's view of new installations wait for it.

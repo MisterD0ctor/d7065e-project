@@ -173,8 +173,8 @@ it, and **the truth is never published to BuildSim**.
 | Option | Pro | Con |
 |---|---|---|
 | A. Physics adds noise and writes sensor values to BuildSim itself | Fewest parts | **Breaks the course rule**: no sensor process. Also puts truth and observation in one process |
-| **B. Physics serves the truth over its own HTTP API (`GET /rooms?level=level0` → CO₂, temperature, occupancy, model time per room). One `sensor` binary runs as three gateway containers, one per kind: `sensor-co2`, `sensor-temp`, `sensor-occupancy`. Each samples the truth every 60 model-s, adds noise and faults (stuck, dropout, drift, lag), and `PUT`s the reading to BuildSim** | Matches Lecture 2. Truth stays out of BuildSim, so the controller can't read it by accident. Killing `sensor-co2` in the demo exercises degraded mode (FR-7) while the other kinds keep running | Three more containers; the truth API is a new interface to specify |
-| C. One gateway per room | Real per-device isolation | 150 containers |
+| B. Physics serves the truth over its own HTTP API; one gateway container per sensor kind samples it for all rooms, adds noise and faults, and writes to BuildSim | Matches Lecture 2; only three containers | A gateway crash silences that kind in every room; ids and rooms come from configuration, not from an installer |
+| **C. Physics serves the truth over its own HTTP API (`GET /rooms?room=level0/1570`). Every sensor is its own container: it knows only its device id and hardware kind, learns its room from the registry (D-10), samples its room's truth every 60 model-s, adds noise and faults, and `PUT`s the reading to BuildSim** | One process per device, as a real installation has. A dead sensor affects one room. Truth stays out of BuildSim | ~150 sensor containers for 50 rooms; the compose file is generated (`cmd/gendevices`) |
 
 The course material is not consistent here. The lab quickstart diagram and the
 report guide (§3.2) have the *physics* write sensor values into BuildSim and
@@ -183,14 +183,13 @@ Lecture 2 (slide 7) have sensor processes write the readings. We follow the
 lectures because they keep the truth out of BuildSim. Say so in the report and
 name the quickstart shape as the rejected alternative.
 
-**Recommendation: B.** Each gateway registers its equipment at start
-(`POST /api/equipment/bulk` skips ids that already exist), so a restart
-re-registers without harm (Lecture 1, slide 17). Fault injection is config on
-the gateway, e.g. `FAULT=stuck:level0/A109`.
+**Chosen: C** (decided 2026-09-30, after first building B). The registry, not
+the sensor, registers the equipment in BuildSim (D-10). Fault injection is
+config on one device: `FAULT_CO2_0001=stuck docker compose up -d co2-0001`.
 
-**Scale check:** 3 sensors × 50 rooms = 150 PUTs per sample, now split across
-three gateways (50 each). The whole building (838 rooms) would be ~2 500 PUTs
-per sample, and each one triggers a viewer broadcast.
+**Scale check:** 3 sensors × 50 rooms = 150 PUTs per sample, one per sensor
+container. The whole building (838 rooms) would be ~2 500 PUTs per sample, and
+each one triggers a viewer broadcast.
 
 ## D-3. Transport: getting observations to their consumers
 
@@ -328,12 +327,29 @@ they reached, with faults like stuck or slow.
 
 | Option | Pro | Con |
 |---|---|---|
-| **A. One `actuator` binary run as two containers by kind: `actuator-damper` and `actuator-heating`, each for all 50 rooms. `POST /rooms/{level}/{room}/command {value, cmd_id, issued_at}`, idempotent on `cmd_id`. Moves towards the target at a fixed rate in model time, `PUT`s the reached state to BuildSim, and physics reads it back from there** | Two failure domains instead of one. Registers its equipment at start, like the gateways. Faults via config | A crash affects every room of that kind |
-| B. One actuator container per room and kind | Real per-device isolation | 100 containers to manage |
+| A. One actuator container per kind (`actuator-damper`, `actuator-heating`), each for all rooms | Two containers | A crash affects every room of that kind; built first, then replaced |
+| **B. One container per actuator: a damper or a radiator valve in one room. It learns its room and the room's sizing from the registry and advertises where to send commands (D-10). `POST /rooms/{level}/{room}/command {value, cmd_id, issued_at}`, idempotent on `cmd_id`. Moves towards the target at a fixed rate in model time, `PUT`s the reached state to BuildSim, and physics reads it back from there** | Real per-device isolation: one failed damper affects one room | ~100 actuator containers for 50 rooms, generated |
 | C. One actuator container for everything | Fewest containers | Heating and ventilation fail together |
 
-**Recommendation: A.** Say in the report that per-device isolation was traded
-for operability, and that one process stands in for a gateway to many devices.
+**Chosen: B** (2026-09-30). The controller finds each room's actuators through
+the registry, so nothing is configured twice.
+
+## D-10. Device commissioning
+
+In a real building a technician mounts each device and records what went
+where. The system must find out from that record, not from configuration
+files a developer edits.
+
+| Option | Pro | Con |
+|---|---|---|
+| A. Device lists in configuration (`ROOMS` per service, ids derived from room names) | No extra service | Nobody installs anything; a new device means editing and redeploying services |
+| B. The installer registers devices straight in BuildSim's equipment list | No new service | BuildSim is "restart = blank" (Lecture 1, slide 16), so every installation is lost on restart; BuildSim isn't ours |
+| **C. A `registry` service with its own SQLite database. The installer enters id, kind and room (web form at `:8070` or `cmd/install`). The registry checks the room exists in the floor plan, stores the room's sizing, and keeps BuildSim's equipment list in step, recreating it after a BuildSim restart. A device boots knowing only its id and kind, checks in, and learns its room; until it is registered it does nothing. Actuators advertise their address at check-in, so the controller finds them (the service-registry pattern, Lecture 1, slide 41)** | Matches how a building is commissioned. Typos are caught at installation. BuildSim restarts are harmless | One more service on the start-up path; if the registry is down, new devices can't start (running ones keep going) |
+
+**Chosen: C** (suggested by the lecturer). Known limitation: devices don't
+authenticate to the registry. A real installation would hand each device a
+secret at commissioning, so a random device on the LAN can't pose as a sensor.
+State this in the report.
 
 ---
 
@@ -370,22 +386,22 @@ for operability, and that one process stands in for a gateway to many devices.
                                        └─────────┘
 ```
 
-Our containers: `physics`, `sensor-co2`, `sensor-temp`, `sensor-occupancy`,
-`actuator-damper`, `actuator-heating`, `controller`, `storage`, `viz`, `train`
-(batch), plus `mosquitto`. **The first slice** needs only `physics`, `sensor-co2`,
-`controller` (reactive policy) and `actuator-damper`, for one room, talking REST.
+Our containers: `physics`, `registry`, `controller`, `storage`, `viz`, `train`
+(batch) and `mosquitto`, plus **one container per device** (5 per room:
+CO₂, temperature and occupancy sensors, damper, radiator valve), generated
+into `compose.devices.yaml` from the installation list `deploy/devices.csv`.
+The sketch above predates the registry and per-device containers; the D2
+diagram (`docs/diagrams/container.d2`) is current.
 
-Proposed repo layout (Go, one module, one `cmd/` per binary; `sensor` and
-`actuator` each run as several containers):
+Repo layout (Go, one module, one `cmd/` per binary; `sensor` and `actuator`
+run as one container per device):
 
 ```
-cmd/physics  cmd/sensor  cmd/actuator  cmd/controller  cmd/storage  cmd/viz  cmd/train
-internal/buildsim   # thin client (or import external/buildingsim/pkg/client)
-internal/model      # observation / command / decision record types + JSON schema
-internal/clock      # model-time source (occupancysim)
-internal/faults     # noise, stuck, dropout, drift
-internal/predict  internal/policy  internal/sizing
-compose.yaml  docs/  external/
+cmd/physics cmd/sensor cmd/actuator cmd/controller cmd/storage cmd/registry
+cmd/install cmd/gendevices                     # installer's tool, compose generator
+internal/buildsim internal/clock internal/devreg internal/registry internal/store
+internal/msg internal/mqttx internal/faults internal/roommodel internal/sizing
+compose.yaml compose.devices.yaml (generated) deploy/ docs/ external/
 ```
 
 ---
@@ -410,7 +426,7 @@ report §10.
 | FR-8 | Every observation, ground-truth value, command and decision is stored with model time and a run id | Check: a run's JSONL files can rebuild its report plots |
 | FR-9 | The policy is chosen by a flag: `constant`, `reactive`, `predictive`, `oracle`. Everything else is identical between runs | Config diff between runs shows only the policy changed |
 | FR-10 | The BuildSim viewer shows measured CO₂, measured and predicted occupancy, and airflow per room, plus alerts for overrides and degraded mode | Demo and screenshot |
-| FR-11 | Every sensor gateway and actuator registers its equipment in BuildSim at start, so a restarted process carries on without manual steps | Test: delete a gateway's equipment, restart it, check it reappears |
+| FR-11 | Devices are commissioned in the registry: a device does nothing until an installer has registered its id, kind and room, and the registry keeps BuildSim's equipment list in step with what is installed, also after a BuildSim restart | T-17, T-28–T-30 |
 
 ### Non-functional
 
@@ -475,14 +491,15 @@ is why the maximum sits above design.
 | # | Decision | Chosen | Rejected alternative | Requirement served | Trade-off accepted |
 |---|---|---|---|---|---|
 | D-1 | Time source | Physics reads occupancysim's clock; observations carry model time | Every service keeps its own `wall × factor` clock | FR-1, NFR-4 | Physics depends on occupancysim being up |
-| D-2 | Sensor noise/faults | Separate gateway per sensor kind, sampling a truth API on physics | Physics writes noisy values to BuildSim itself | FR-2, FR-7, FR-11 | Three extra containers and a truth API to specify |
+| D-2 | Sensor noise/faults | One container per sensor device, sampling its room from a truth API on physics | Physics writes noisy values to BuildSim itself; one gateway per kind | FR-2, FR-7, FR-11 | ~150 sensor containers; a truth API to specify |
 | D-3 | Transport | REST for the first slice; gateways also publish to MQTT once storage exists | A separate collector polling BuildSim | NFR-5, NFR-6 | A broker to run; two non-atomic writes per reading |
 | D-4 | Storage | A `storage` service owning JSONL per run, served over HTTP | JSONL files shared between processes | FR-8, NFR-7 | A small query API to write |
 | D-5 | Decomposition of autonomy | Validation, prediction and policy in one controller; training as a batch job | Predictor as its own service | FR-3, FR-4 | Parts of the controller can't be restarted separately |
 | D-6 | Safety filter placement | In the actuator, independent of the controller | Inside the controller, after the policy | FR-5, FR-6, NFR-6 | The actuator needs sizing data and the CO₂ stream |
 | D-7 | Baselines/oracle | Policy interface with four implementations; the oracle replays recorded truth | Oracle reading occupancysim's plans | FR-9, NFR-7 | Depends on same-seed runs being identical |
 | D-8 | Dashboard | `viz` process publishing room layers and alerts to the BuildSim viewer | Own web dashboard | FR-10 | No history in the live view; plots come from storage offline |
-| D-9 | Actuator granularity | One process per actuator kind (damper, heating) for all rooms | One process per room | FR-5, NFR-6 | A crash affects every room of that kind |
+| D-9 | Actuator granularity | One container per actuator device | One container per kind for all rooms | FR-5, NFR-6 | ~100 actuator containers, generated |
+| D-10 | Device commissioning | Registry service with SQLite; devices learn their room at check-in | Device lists in configuration; registering straight in BuildSim | FR-11 | One more service on the start-up path; no device authentication |
 | — | **Room set (scale)** | 50 rooms on level0: the 3 fika rooms, 20 lecture rooms and 27 offices, as a fixed list in config (a seeded random sample, so it is reproducible) | Whole building (838 rooms, ~2 500 PUTs per sample) or all of level0 (277 rooms) | NFR-5 | Most of level0's lecture rooms are left out, so many lectures land in rooms we don't simulate. With 20 of ~48, about 40 % of the lectures fall inside the set |
 
 Each row cites a requirement ID from the section above. The report guide

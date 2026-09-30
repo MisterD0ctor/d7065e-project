@@ -108,6 +108,18 @@ func (c *Client) BulkCreate(ctx context.Context, eq []Equipment) error {
 	return c.do(ctx, http.MethodPost, "/api/equipment/bulk", eq, nil)
 }
 
+// DeleteEquipment removes a unit and its sensors and actuators.
+func (c *Client) DeleteEquipment(ctx context.Context, id string) error {
+	return c.do(ctx, http.MethodDelete, "/api/equipment/"+url.PathEscape(id), nil, nil)
+}
+
+// SensorValue reads one sensor.
+func (c *Client) SensorValue(ctx context.Context, sensorID string) (Sensor, error) {
+	var s Sensor
+	err := c.do(ctx, http.MethodGet, "/api/sensors/"+url.PathEscape(sensorID), nil, &s)
+	return s, err
+}
+
 func (c *Client) SetSensorValue(ctx context.Context, sensorID, value string) error {
 	body := map[string]string{"data_type": "text", "value": value}
 	return c.do(ctx, http.MethodPut, "/api/sensors/"+url.PathEscape(sensorID)+"/value", body, nil)

@@ -26,7 +26,7 @@ under load), **eval** (full evaluation runs).
 | T-14 | Rebuild a report plot from `GET /runs/{id}/export` alone | integration | FR-8 | The plot matches the one in the report |
 | T-15 | Policy flag: diff the configs of two baseline runs | integration | FR-9 | Only `POLICY` differs |
 | T-16 | Viewer: layers and alerts during T-09 and T-12 | integration | FR-10 | All four layers present; override and degraded alerts visible (screenshot) |
-| T-17 | Re-registration: delete a gateway's equipment in BuildSim, restart it | fault | FR-11 | Equipment reappears; readings resume |
+| T-17 | BuildSim restart: it comes back blank | fault | FR-11 | The registry recreates every device's equipment within 10 s; readings resume |
 | T-18 | Air quality over the evaluation period, per baseline | eval | NFR-1 | `predictive`: CO₂ ≤ 1000 ppm for ≥ 95 % of occupied room-minutes |
 | T-19 | Comfort over the evaluation period, per baseline | eval | NFR-2 | ≥ 95 % of occupied room-minutes in 20–24 °C |
 | T-20 | Energy proxy per baseline | eval | NFR-3 | `predictive` ≥ 30 % below `constant`; compared with `reactive` and `oracle` |
@@ -37,6 +37,10 @@ under load), **eval** (full evaluation runs).
 | T-25 | Reproducibility: two runs with the same seed and dates | integration | NFR-7, D-7 | True occupancy identical, room by room, minute by minute |
 | T-26 | Timed evaluation run | eval | NFR-8 | One baseline over 5 simulated weekdays in ≤ 2.5 h real |
 | T-27 | Truth boundary: controller tries to subscribe to `truth/#` and call the truth API | integration | §0 scope, C-1 | Both refused (Mosquitto ACL; no network route) |
+| T-28 | Start a device that no installer has registered | integration | FR-11, D-10 | It publishes nothing and accepts no commands; once registered it starts within 5 s |
+| T-29 | Installer mistakes: a room not in the floor plan, an unknown kind, an id already taken | unit + integration | FR-11, D-10 | 422, 422, 409; nothing stored |
+| T-30 | Retire a device | integration | FR-11, D-10 | It stops reporting at its next check-in (≤ 30 s); its equipment leaves BuildSim |
+| T-31 | Register a CO₂ sensor's id as a damper, then start the sensor | integration | D-10 | The device refuses to start and says the registry entry is wrong |
 
 T-22 is the grade-5 test ("finds the limits", Lecture 1, slide 53): report
 where the system stops working, not only that 50 rooms work.

@@ -4,6 +4,7 @@
 
 user physics
 topic write truth/#
+topic write time/#
 
 user sensor
 topic write obs/#
@@ -14,6 +15,7 @@ topic write decision/#
 
 user actuator
 topic read obs/#
+topic read time/#
 topic write event/#
 
 user storage
