@@ -23,7 +23,8 @@ type Client struct {
 func New(baseURL string) *Client {
 	return &Client{
 		base: strings.TrimRight(baseURL, "/"),
-		http: &http.Client{Timeout: 2 * time.Second},
+		// Per-call deadline; Floor overrides it through its context.
+		http: &http.Client{Timeout: 15 * time.Second},
 	}
 }
 
@@ -89,7 +90,11 @@ type RoomOccupancy struct {
 	Persons []Person `json:"persons"`
 }
 
+// Floor reads a floor plan. It is large (rooms plus the walkable graph), so
+// it gets more time than the other calls: under load, 2 s wasn't enough.
 func (c *Client) Floor(ctx context.Context, level string) (Floor, error) {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
 	var f Floor
 	err := c.do(ctx, http.MethodGet, "/api/building/floors/"+url.PathEscape(level), nil, &f)
 	return f, err
@@ -138,6 +143,11 @@ func (c *Client) Occupancy(ctx context.Context) (map[string]RoomOccupancy, error
 }
 
 func (c *Client) do(ctx context.Context, method, path string, in, out any) error {
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+	}
 	var body io.Reader
 	if in != nil {
 		b, err := json.Marshal(in)

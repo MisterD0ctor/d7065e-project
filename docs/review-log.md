@@ -4,6 +4,42 @@ Two things the oral exam asks about (Lecture 1, slide 55): where AI advice was
 wrong and how we caught it, and why the design looks the way it does. Add an
 entry whenever either happens. Newest first.
 
+## 2026-09-30: first 50-room run (250 device containers)
+
+Every limit hit was the laptop's, not the design's. Each one is a data point
+for the report's limits section (grade 5: "finds the limits").
+
+| Limit hit | Symptom | Fix |
+|---|---|---|
+| Kernel keyring quota: `kernel.keys.maxkeys = 200` per user, and Podman gives every container a keyring | Only ~195 containers started; the rest failed with `Disk quota exceeded` | `keyring = false` in `~/.config/containers/containers.conf` (user-level, no root) |
+| Compose's default network is a /24: 254 addresses for 257 containers | `IPAM error: failed to find free IP` | The project network is a /22 in `compose.yaml` |
+| The floor plan (rooms plus the walkable graph) took over 2 s from BuildSim under load | 10 of 250 registrations failed with a timeout | Floor-plan reads get 15 s; other BuildSim calls keep 2 s |
+| Kernel neighbour (ARP) table: `gc_thresh3 = 1024` entries, **shared by all network namespaces**. Each container holds one entry per peer it talks to (gateway, physics, registry, BuildSim, broker): ~5 × 257 > 1024 | DNS lookups failed (`Message too large`, `No buffer space available`); sensors couldn't reach physics, so no readings | Needs root: raise `net.ipv4.neigh.default.gc_thresh1/2/3` to 1024/4096/8192 |
+
+The architecture scales linearly (5 containers per room), but a stock Fedora
+laptop stops at roughly **200 containers**, i.e. ~40 rooms, before any code of
+ours is the bottleneck.
+
+After raising the neighbour-table limit (run `scale50-reactive-2`), two more
+findings:
+
+| Finding | How it was caught | Fix |
+|---|---|---|
+| `temp-0017` missed about one reading in five. Sensors polled physics at 1 Hz, the same rate physics updates at factor 60, so a sensor whose phase lined up with the update sometimes read one snapshot twice and then skipped a minute (aliasing) | Per-minute counts of readings per sensor in storage | Sensors poll physics every 250 ms real. Rerun: no gaps |
+| 17 commands (8 in the rerun) were rejected as expired (`409`), all at 08:00 | Decision statuses in storage | None needed: that is the moment the clock was moved *back* to 08:00. For one tick the actuators still held the later time, so commands stamped 08:00 looked expired. Only a manual clock jump causes it |
+
+**Result, run `scale50-reactive-3`** (50 rooms, 257 containers, factor 60,
+Monday 08:00 onwards, reactive policy, 184 model-minutes):
+
+| Measure | Result |
+|---|---|
+| CO₂, temperature, occupancy readings per model minute | 50 of 50 in **every** minute (184/184 each), so NFR-5 holds at 50 rooms |
+| Truth records per model minute | 50 of 50 (211/211) |
+| Commands | 21 400, of which 21 392 accepted (`202`); 8 expired at the clock jump |
+| Occupied room-minutes with CO₂ > 1000 ppm | 0 of 894 (max 958 ppm) in this morning window |
+| Resources | ~1 CPU core in total across all containers (of 16); memory ~8 GB free of 31 |
+| Start-up | `docker compose up` ~40 s; registering 250 devices ~26 s |
+
 ## 2026-09-30: device registry, one process per device
 
 Design change (D-2, D-9, new D-10): the lecturer suggested a device database

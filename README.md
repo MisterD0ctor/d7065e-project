@@ -32,6 +32,20 @@ stack.
 On a machine where the Docker socket is root-only, point Compose at rootless
 Podman first: `export DOCKER_HOST=unix:///run/user/$UID/podman/podman.sock`.
 
+With 50 rooms the stack is ~257 containers, which a stock Linux laptop can't
+run without two changes (see docs/review-log.md, "first 50-room run"):
+
+```
+# ~/.config/containers/containers.conf  (Podman: no kernel keyring per container)
+[containers]
+keyring = false
+
+# /etc/sysctl.d/90-neigh.conf  (root; the ARP table is shared by all containers)
+net.ipv4.neigh.default.gc_thresh1 = 1024
+net.ipv4.neigh.default.gc_thresh2 = 4096
+net.ipv4.neigh.default.gc_thresh3 = 8192
+```
+
 ### Planning the installation
 
 ```

@@ -32,8 +32,12 @@ import (
 	"github.com/MisterD0ctor/d7065e-project/internal/rooms"
 )
 
-// CheckInEvery is the heartbeat to the registry; it also notices retirement.
-const CheckInEvery = 30 * time.Second
+const (
+	// CheckInEvery is the heartbeat to the registry; it also notices retirement.
+	CheckInEvery = 30 * time.Second
+	// PollEvery is how often the sensor looks at physics, in real time.
+	PollEvery = 250 * time.Millisecond
+)
 
 type truth struct {
 	ModelTime string `json:"model_time"`
@@ -98,7 +102,11 @@ func main() {
 		runID:   env.String("RUN_ID", "dev"),
 	}
 
-	tick := time.NewTicker(time.Second)
+	// Poll physics four times per physics tick. Polling at the same 1 Hz as
+	// physics updates aliases: a sensor whose phase lines up with the update
+	// sometimes reads one snapshot twice and then skips a minute (found in
+	// the 50-room run: temp-0017 missed ~1 reading in 5).
+	tick := time.NewTicker(PollEvery)
 	defer tick.Stop()
 	heartbeat := time.NewTicker(CheckInEvery)
 	defer heartbeat.Stop()

@@ -128,3 +128,11 @@ services:
 volumes:
   storage-data:
   registry-data:
+
+networks:
+  default:
+    # One container per device: 50 rooms × 5 devices plus the services is
+    # more than a /24 holds (254 addresses). A /22 fits ~1000.
+    ipam:
+      config:
+        - subnet: 10.90.0.0/22

@@ -22,9 +22,9 @@ x-device-env: &device-env
 services:
   physics:
     environment:
-      ROOMS: "level0/1570"
+      ROOMS: "level0/1543,level0/1570,level0/1572A,level0/1586,level0/1588,level0/A1001,level0/A1003,level0/A1007A,level0/A1014,level0/A1017,level0/A1022,level0/A1022A,level0/A1023,level0/A1025,level0/A105,level0/A108,level0/A109,level0/A110,level0/A1101,level0/A1112,level0/A1113,level0/A1115,level0/A1117B,level0/A1122,level0/A113C,level0/A117,level0/A119,level0/A123,level0/A1302,level0/A1306,level0/A133,level0/A1401,level0/A1402,level0/A144,level0/A148,level0/A1505,level0/A151,level0/A1511A,level0/A1512E,level0/A1514E,level0/A1519,level0/A1522,level0/A167,level0/A169,level0/A173,level0/A177,level0/A179,level0/A303,level0/A306,level0/A307"
 
-  co2-0001:  # co2 in level0/1570
+  co2-0001:  # co2 in level0/1543
     <<: *sensor
     environment:
       <<: *device-env
@@ -34,7 +34,7 @@ services:
       MQTT_PASS: sensor-pw
       FAULT: ${FAULT_CO2_0001:-}
 
-  temp-0001:  # temp in level0/1570
+  temp-0001:  # temp in level0/1543
     <<: *sensor
     environment:
       <<: *device-env
@@ -44,7 +44,7 @@ services:
       MQTT_PASS: sensor-pw
       FAULT: ${FAULT_TEMP_0001:-}
 
-  occ-0001:  # occupancy in level0/1570
+  occ-0001:  # occupancy in level0/1543
     <<: *sensor
     environment:
       <<: *device-env
@@ -54,7 +54,7 @@ services:
       MQTT_PASS: sensor-pw
       FAULT: ${FAULT_OCC_0001:-}
 
-  damper-0001:  # damper in level0/1570
+  damper-0001:  # damper in level0/1543
     <<: *actuator
     environment:
       <<: *device-env
@@ -64,7 +64,7 @@ services:
       MQTT_PASS: actuator-pw
       ADVERTISE_URL: http://damper-0001:8080
 
-  heat-0001:  # heating in level0/1570
+  heat-0001:  # heating in level0/1543
     <<: *actuator
     environment:
       <<: *device-env
@@ -73,4 +73,2454 @@ services:
       MQTT_USER: actuator
       MQTT_PASS: actuator-pw
       ADVERTISE_URL: http://heat-0001:8080
+
+  co2-0002:  # co2 in level0/1570
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0002
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0002:-}
+
+  temp-0002:  # temp in level0/1570
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0002
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0002:-}
+
+  occ-0002:  # occupancy in level0/1570
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0002
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0002:-}
+
+  damper-0002:  # damper in level0/1570
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0002
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0002:8080
+
+  heat-0002:  # heating in level0/1570
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0002
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0002:8080
+
+  co2-0003:  # co2 in level0/1572A
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0003
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0003:-}
+
+  temp-0003:  # temp in level0/1572A
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0003
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0003:-}
+
+  occ-0003:  # occupancy in level0/1572A
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0003
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0003:-}
+
+  damper-0003:  # damper in level0/1572A
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0003
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0003:8080
+
+  heat-0003:  # heating in level0/1572A
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0003
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0003:8080
+
+  co2-0004:  # co2 in level0/1586
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0004
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0004:-}
+
+  temp-0004:  # temp in level0/1586
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0004
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0004:-}
+
+  occ-0004:  # occupancy in level0/1586
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0004
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0004:-}
+
+  damper-0004:  # damper in level0/1586
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0004
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0004:8080
+
+  heat-0004:  # heating in level0/1586
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0004
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0004:8080
+
+  co2-0005:  # co2 in level0/1588
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0005
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0005:-}
+
+  temp-0005:  # temp in level0/1588
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0005
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0005:-}
+
+  occ-0005:  # occupancy in level0/1588
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0005
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0005:-}
+
+  damper-0005:  # damper in level0/1588
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0005
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0005:8080
+
+  heat-0005:  # heating in level0/1588
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0005
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0005:8080
+
+  co2-0006:  # co2 in level0/A1001
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0006
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0006:-}
+
+  temp-0006:  # temp in level0/A1001
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0006
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0006:-}
+
+  occ-0006:  # occupancy in level0/A1001
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0006
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0006:-}
+
+  damper-0006:  # damper in level0/A1001
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0006
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0006:8080
+
+  heat-0006:  # heating in level0/A1001
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0006
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0006:8080
+
+  co2-0007:  # co2 in level0/A1003
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0007
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0007:-}
+
+  temp-0007:  # temp in level0/A1003
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0007
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0007:-}
+
+  occ-0007:  # occupancy in level0/A1003
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0007
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0007:-}
+
+  damper-0007:  # damper in level0/A1003
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0007
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0007:8080
+
+  heat-0007:  # heating in level0/A1003
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0007
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0007:8080
+
+  co2-0008:  # co2 in level0/A1007A
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0008
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0008:-}
+
+  temp-0008:  # temp in level0/A1007A
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0008
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0008:-}
+
+  occ-0008:  # occupancy in level0/A1007A
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0008
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0008:-}
+
+  damper-0008:  # damper in level0/A1007A
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0008
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0008:8080
+
+  heat-0008:  # heating in level0/A1007A
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0008
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0008:8080
+
+  co2-0009:  # co2 in level0/A1014
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0009
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0009:-}
+
+  temp-0009:  # temp in level0/A1014
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0009
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0009:-}
+
+  occ-0009:  # occupancy in level0/A1014
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0009
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0009:-}
+
+  damper-0009:  # damper in level0/A1014
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0009
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0009:8080
+
+  heat-0009:  # heating in level0/A1014
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0009
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0009:8080
+
+  co2-0010:  # co2 in level0/A1017
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0010
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0010:-}
+
+  temp-0010:  # temp in level0/A1017
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0010
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0010:-}
+
+  occ-0010:  # occupancy in level0/A1017
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0010
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0010:-}
+
+  damper-0010:  # damper in level0/A1017
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0010
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0010:8080
+
+  heat-0010:  # heating in level0/A1017
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0010
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0010:8080
+
+  co2-0011:  # co2 in level0/A1022
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0011
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0011:-}
+
+  temp-0011:  # temp in level0/A1022
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0011
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0011:-}
+
+  occ-0011:  # occupancy in level0/A1022
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0011
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0011:-}
+
+  damper-0011:  # damper in level0/A1022
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0011
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0011:8080
+
+  heat-0011:  # heating in level0/A1022
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0011
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0011:8080
+
+  co2-0012:  # co2 in level0/A1022A
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0012
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0012:-}
+
+  temp-0012:  # temp in level0/A1022A
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0012
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0012:-}
+
+  occ-0012:  # occupancy in level0/A1022A
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0012
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0012:-}
+
+  damper-0012:  # damper in level0/A1022A
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0012
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0012:8080
+
+  heat-0012:  # heating in level0/A1022A
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0012
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0012:8080
+
+  co2-0013:  # co2 in level0/A1023
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0013
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0013:-}
+
+  temp-0013:  # temp in level0/A1023
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0013
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0013:-}
+
+  occ-0013:  # occupancy in level0/A1023
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0013
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0013:-}
+
+  damper-0013:  # damper in level0/A1023
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0013
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0013:8080
+
+  heat-0013:  # heating in level0/A1023
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0013
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0013:8080
+
+  co2-0014:  # co2 in level0/A1025
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0014
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0014:-}
+
+  temp-0014:  # temp in level0/A1025
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0014
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0014:-}
+
+  occ-0014:  # occupancy in level0/A1025
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0014
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0014:-}
+
+  damper-0014:  # damper in level0/A1025
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0014
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0014:8080
+
+  heat-0014:  # heating in level0/A1025
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0014
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0014:8080
+
+  co2-0015:  # co2 in level0/A105
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0015
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0015:-}
+
+  temp-0015:  # temp in level0/A105
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0015
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0015:-}
+
+  occ-0015:  # occupancy in level0/A105
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0015
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0015:-}
+
+  damper-0015:  # damper in level0/A105
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0015
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0015:8080
+
+  heat-0015:  # heating in level0/A105
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0015
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0015:8080
+
+  co2-0016:  # co2 in level0/A108
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0016
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0016:-}
+
+  temp-0016:  # temp in level0/A108
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0016
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0016:-}
+
+  occ-0016:  # occupancy in level0/A108
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0016
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0016:-}
+
+  damper-0016:  # damper in level0/A108
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0016
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0016:8080
+
+  heat-0016:  # heating in level0/A108
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0016
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0016:8080
+
+  co2-0017:  # co2 in level0/A109
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0017
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0017:-}
+
+  temp-0017:  # temp in level0/A109
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0017
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0017:-}
+
+  occ-0017:  # occupancy in level0/A109
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0017
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0017:-}
+
+  damper-0017:  # damper in level0/A109
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0017
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0017:8080
+
+  heat-0017:  # heating in level0/A109
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0017
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0017:8080
+
+  co2-0018:  # co2 in level0/A110
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0018
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0018:-}
+
+  temp-0018:  # temp in level0/A110
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0018
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0018:-}
+
+  occ-0018:  # occupancy in level0/A110
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0018
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0018:-}
+
+  damper-0018:  # damper in level0/A110
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0018
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0018:8080
+
+  heat-0018:  # heating in level0/A110
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0018
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0018:8080
+
+  co2-0019:  # co2 in level0/A1101
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0019
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0019:-}
+
+  temp-0019:  # temp in level0/A1101
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0019
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0019:-}
+
+  occ-0019:  # occupancy in level0/A1101
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0019
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0019:-}
+
+  damper-0019:  # damper in level0/A1101
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0019
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0019:8080
+
+  heat-0019:  # heating in level0/A1101
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0019
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0019:8080
+
+  co2-0020:  # co2 in level0/A1112
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0020
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0020:-}
+
+  temp-0020:  # temp in level0/A1112
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0020
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0020:-}
+
+  occ-0020:  # occupancy in level0/A1112
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0020
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0020:-}
+
+  damper-0020:  # damper in level0/A1112
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0020
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0020:8080
+
+  heat-0020:  # heating in level0/A1112
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0020
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0020:8080
+
+  co2-0021:  # co2 in level0/A1113
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0021
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0021:-}
+
+  temp-0021:  # temp in level0/A1113
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0021
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0021:-}
+
+  occ-0021:  # occupancy in level0/A1113
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0021
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0021:-}
+
+  damper-0021:  # damper in level0/A1113
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0021
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0021:8080
+
+  heat-0021:  # heating in level0/A1113
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0021
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0021:8080
+
+  co2-0022:  # co2 in level0/A1115
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0022
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0022:-}
+
+  temp-0022:  # temp in level0/A1115
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0022
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0022:-}
+
+  occ-0022:  # occupancy in level0/A1115
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0022
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0022:-}
+
+  damper-0022:  # damper in level0/A1115
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0022
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0022:8080
+
+  heat-0022:  # heating in level0/A1115
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0022
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0022:8080
+
+  co2-0023:  # co2 in level0/A1117B
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0023
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0023:-}
+
+  temp-0023:  # temp in level0/A1117B
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0023
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0023:-}
+
+  occ-0023:  # occupancy in level0/A1117B
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0023
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0023:-}
+
+  damper-0023:  # damper in level0/A1117B
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0023
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0023:8080
+
+  heat-0023:  # heating in level0/A1117B
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0023
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0023:8080
+
+  co2-0024:  # co2 in level0/A1122
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0024
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0024:-}
+
+  temp-0024:  # temp in level0/A1122
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0024
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0024:-}
+
+  occ-0024:  # occupancy in level0/A1122
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0024
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0024:-}
+
+  damper-0024:  # damper in level0/A1122
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0024
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0024:8080
+
+  heat-0024:  # heating in level0/A1122
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0024
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0024:8080
+
+  co2-0025:  # co2 in level0/A113C
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0025
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0025:-}
+
+  temp-0025:  # temp in level0/A113C
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0025
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0025:-}
+
+  occ-0025:  # occupancy in level0/A113C
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0025
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0025:-}
+
+  damper-0025:  # damper in level0/A113C
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0025
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0025:8080
+
+  heat-0025:  # heating in level0/A113C
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0025
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0025:8080
+
+  co2-0026:  # co2 in level0/A117
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0026
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0026:-}
+
+  temp-0026:  # temp in level0/A117
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0026
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0026:-}
+
+  occ-0026:  # occupancy in level0/A117
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0026
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0026:-}
+
+  damper-0026:  # damper in level0/A117
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0026
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0026:8080
+
+  heat-0026:  # heating in level0/A117
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0026
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0026:8080
+
+  co2-0027:  # co2 in level0/A119
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0027
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0027:-}
+
+  temp-0027:  # temp in level0/A119
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0027
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0027:-}
+
+  occ-0027:  # occupancy in level0/A119
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0027
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0027:-}
+
+  damper-0027:  # damper in level0/A119
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0027
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0027:8080
+
+  heat-0027:  # heating in level0/A119
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0027
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0027:8080
+
+  co2-0028:  # co2 in level0/A123
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0028
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0028:-}
+
+  temp-0028:  # temp in level0/A123
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0028
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0028:-}
+
+  occ-0028:  # occupancy in level0/A123
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0028
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0028:-}
+
+  damper-0028:  # damper in level0/A123
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0028
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0028:8080
+
+  heat-0028:  # heating in level0/A123
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0028
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0028:8080
+
+  co2-0029:  # co2 in level0/A1302
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0029
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0029:-}
+
+  temp-0029:  # temp in level0/A1302
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0029
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0029:-}
+
+  occ-0029:  # occupancy in level0/A1302
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0029
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0029:-}
+
+  damper-0029:  # damper in level0/A1302
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0029
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0029:8080
+
+  heat-0029:  # heating in level0/A1302
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0029
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0029:8080
+
+  co2-0030:  # co2 in level0/A1306
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0030
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0030:-}
+
+  temp-0030:  # temp in level0/A1306
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0030
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0030:-}
+
+  occ-0030:  # occupancy in level0/A1306
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0030
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0030:-}
+
+  damper-0030:  # damper in level0/A1306
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0030
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0030:8080
+
+  heat-0030:  # heating in level0/A1306
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0030
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0030:8080
+
+  co2-0031:  # co2 in level0/A133
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0031
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0031:-}
+
+  temp-0031:  # temp in level0/A133
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0031
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0031:-}
+
+  occ-0031:  # occupancy in level0/A133
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0031
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0031:-}
+
+  damper-0031:  # damper in level0/A133
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0031
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0031:8080
+
+  heat-0031:  # heating in level0/A133
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0031
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0031:8080
+
+  co2-0032:  # co2 in level0/A1401
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0032
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0032:-}
+
+  temp-0032:  # temp in level0/A1401
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0032
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0032:-}
+
+  occ-0032:  # occupancy in level0/A1401
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0032
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0032:-}
+
+  damper-0032:  # damper in level0/A1401
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0032
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0032:8080
+
+  heat-0032:  # heating in level0/A1401
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0032
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0032:8080
+
+  co2-0033:  # co2 in level0/A1402
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0033
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0033:-}
+
+  temp-0033:  # temp in level0/A1402
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0033
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0033:-}
+
+  occ-0033:  # occupancy in level0/A1402
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0033
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0033:-}
+
+  damper-0033:  # damper in level0/A1402
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0033
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0033:8080
+
+  heat-0033:  # heating in level0/A1402
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0033
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0033:8080
+
+  co2-0034:  # co2 in level0/A144
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0034
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0034:-}
+
+  temp-0034:  # temp in level0/A144
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0034
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0034:-}
+
+  occ-0034:  # occupancy in level0/A144
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0034
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0034:-}
+
+  damper-0034:  # damper in level0/A144
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0034
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0034:8080
+
+  heat-0034:  # heating in level0/A144
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0034
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0034:8080
+
+  co2-0035:  # co2 in level0/A148
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0035
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0035:-}
+
+  temp-0035:  # temp in level0/A148
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0035
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0035:-}
+
+  occ-0035:  # occupancy in level0/A148
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0035
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0035:-}
+
+  damper-0035:  # damper in level0/A148
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0035
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0035:8080
+
+  heat-0035:  # heating in level0/A148
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0035
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0035:8080
+
+  co2-0036:  # co2 in level0/A1505
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0036
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0036:-}
+
+  temp-0036:  # temp in level0/A1505
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0036
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0036:-}
+
+  occ-0036:  # occupancy in level0/A1505
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0036
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0036:-}
+
+  damper-0036:  # damper in level0/A1505
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0036
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0036:8080
+
+  heat-0036:  # heating in level0/A1505
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0036
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0036:8080
+
+  co2-0037:  # co2 in level0/A151
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0037
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0037:-}
+
+  temp-0037:  # temp in level0/A151
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0037
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0037:-}
+
+  occ-0037:  # occupancy in level0/A151
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0037
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0037:-}
+
+  damper-0037:  # damper in level0/A151
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0037
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0037:8080
+
+  heat-0037:  # heating in level0/A151
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0037
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0037:8080
+
+  co2-0038:  # co2 in level0/A1511A
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0038
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0038:-}
+
+  temp-0038:  # temp in level0/A1511A
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0038
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0038:-}
+
+  occ-0038:  # occupancy in level0/A1511A
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0038
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0038:-}
+
+  damper-0038:  # damper in level0/A1511A
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0038
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0038:8080
+
+  heat-0038:  # heating in level0/A1511A
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0038
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0038:8080
+
+  co2-0039:  # co2 in level0/A1512E
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0039
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0039:-}
+
+  temp-0039:  # temp in level0/A1512E
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0039
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0039:-}
+
+  occ-0039:  # occupancy in level0/A1512E
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0039
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0039:-}
+
+  damper-0039:  # damper in level0/A1512E
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0039
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0039:8080
+
+  heat-0039:  # heating in level0/A1512E
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0039
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0039:8080
+
+  co2-0040:  # co2 in level0/A1514E
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0040
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0040:-}
+
+  temp-0040:  # temp in level0/A1514E
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0040
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0040:-}
+
+  occ-0040:  # occupancy in level0/A1514E
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0040
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0040:-}
+
+  damper-0040:  # damper in level0/A1514E
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0040
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0040:8080
+
+  heat-0040:  # heating in level0/A1514E
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0040
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0040:8080
+
+  co2-0041:  # co2 in level0/A1519
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0041
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0041:-}
+
+  temp-0041:  # temp in level0/A1519
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0041
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0041:-}
+
+  occ-0041:  # occupancy in level0/A1519
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0041
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0041:-}
+
+  damper-0041:  # damper in level0/A1519
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0041
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0041:8080
+
+  heat-0041:  # heating in level0/A1519
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0041
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0041:8080
+
+  co2-0042:  # co2 in level0/A1522
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0042
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0042:-}
+
+  temp-0042:  # temp in level0/A1522
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0042
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0042:-}
+
+  occ-0042:  # occupancy in level0/A1522
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0042
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0042:-}
+
+  damper-0042:  # damper in level0/A1522
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0042
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0042:8080
+
+  heat-0042:  # heating in level0/A1522
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0042
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0042:8080
+
+  co2-0043:  # co2 in level0/A167
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0043
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0043:-}
+
+  temp-0043:  # temp in level0/A167
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0043
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0043:-}
+
+  occ-0043:  # occupancy in level0/A167
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0043
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0043:-}
+
+  damper-0043:  # damper in level0/A167
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0043
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0043:8080
+
+  heat-0043:  # heating in level0/A167
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0043
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0043:8080
+
+  co2-0044:  # co2 in level0/A169
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0044
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0044:-}
+
+  temp-0044:  # temp in level0/A169
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0044
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0044:-}
+
+  occ-0044:  # occupancy in level0/A169
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0044
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0044:-}
+
+  damper-0044:  # damper in level0/A169
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0044
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0044:8080
+
+  heat-0044:  # heating in level0/A169
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0044
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0044:8080
+
+  co2-0045:  # co2 in level0/A173
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0045
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0045:-}
+
+  temp-0045:  # temp in level0/A173
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0045
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0045:-}
+
+  occ-0045:  # occupancy in level0/A173
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0045
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0045:-}
+
+  damper-0045:  # damper in level0/A173
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0045
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0045:8080
+
+  heat-0045:  # heating in level0/A173
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0045
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0045:8080
+
+  co2-0046:  # co2 in level0/A177
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0046
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0046:-}
+
+  temp-0046:  # temp in level0/A177
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0046
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0046:-}
+
+  occ-0046:  # occupancy in level0/A177
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0046
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0046:-}
+
+  damper-0046:  # damper in level0/A177
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0046
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0046:8080
+
+  heat-0046:  # heating in level0/A177
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0046
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0046:8080
+
+  co2-0047:  # co2 in level0/A179
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0047
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0047:-}
+
+  temp-0047:  # temp in level0/A179
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0047
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0047:-}
+
+  occ-0047:  # occupancy in level0/A179
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0047
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0047:-}
+
+  damper-0047:  # damper in level0/A179
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0047
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0047:8080
+
+  heat-0047:  # heating in level0/A179
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0047
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0047:8080
+
+  co2-0048:  # co2 in level0/A303
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0048
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0048:-}
+
+  temp-0048:  # temp in level0/A303
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0048
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0048:-}
+
+  occ-0048:  # occupancy in level0/A303
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0048
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0048:-}
+
+  damper-0048:  # damper in level0/A303
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0048
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0048:8080
+
+  heat-0048:  # heating in level0/A303
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0048
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0048:8080
+
+  co2-0049:  # co2 in level0/A306
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0049
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0049:-}
+
+  temp-0049:  # temp in level0/A306
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0049
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0049:-}
+
+  occ-0049:  # occupancy in level0/A306
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0049
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0049:-}
+
+  damper-0049:  # damper in level0/A306
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0049
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0049:8080
+
+  heat-0049:  # heating in level0/A306
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0049
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0049:8080
+
+  co2-0050:  # co2 in level0/A307
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: co2-0050
+      DEVICE_KIND: co2
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_CO2_0050:-}
+
+  temp-0050:  # temp in level0/A307
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: temp-0050
+      DEVICE_KIND: temp
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_TEMP_0050:-}
+
+  occ-0050:  # occupancy in level0/A307
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: occ-0050
+      DEVICE_KIND: occupancy
+      MQTT_USER: sensor
+      MQTT_PASS: sensor-pw
+      FAULT: ${FAULT_OCC_0050:-}
+
+  damper-0050:  # damper in level0/A307
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: damper-0050
+      DEVICE_KIND: damper
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://damper-0050:8080
+
+  heat-0050:  # heating in level0/A307
+    <<: *actuator
+    environment:
+      <<: *device-env
+      DEVICE_ID: heat-0050
+      DEVICE_KIND: heating
+      MQTT_USER: actuator
+      MQTT_PASS: actuator-pw
+      ADVERTISE_URL: http://heat-0050:8080
 
