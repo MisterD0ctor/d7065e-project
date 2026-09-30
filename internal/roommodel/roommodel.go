@@ -21,6 +21,11 @@ const (
 	RadiatorPerM2 = 60.0   // W per m² floor, radiator maximum
 	RadiatorBand  = 0.5    // K below setpoint for full radiator power
 	AirHeatCap    = 1200.0 // J/(m³·K), ρ·cp of air
+
+	// Energy proxy (NFR-3). Fan power per airflow is a typical specific fan
+	// power (SFP 1.5 kW per m³/s); the air-handling unit heats outdoor air
+	// to SupplyTemp after heat recovery.
+	SpecificFanPower = 1500.0 // W per m³/s
 )
 
 // Inputs hold for the whole interval passed to Step.
@@ -34,6 +39,11 @@ type Room struct {
 	Size sizing.Room
 	CO2  float64 // ppm
 	Temp float64 // °C
+
+	// Power over the last Step (W), for the energy proxy.
+	FanW      float64
+	AHUHeatW  float64 // heating outdoor air to the supply temperature
+	RadiatorW float64
 }
 
 func New(size sizing.Room) *Room {
@@ -42,11 +52,20 @@ func New(size sizing.Room) *Room {
 
 // Step advances the room by d of model time.
 func (r *Room) Step(d time.Duration, in Inputs) {
+	q := max(in.AirflowLs, 0) / 1000 // m³/s
+	r.FanW = SpecificFanPower * q
+	r.AHUHeatW = AirHeatCap * q * max(SupplyTemp-OutdoorTemp, 0)
+	var radiatorJ, total float64
 	for d > 0 {
 		dt := min(d, MaxStep)
+		radiatorJ += r.radiator(in.Setpoint) * dt.Seconds()
+		total += dt.Seconds()
 		r.stepCO2(dt.Seconds(), in)
 		r.stepTemp(dt.Seconds(), in)
 		d -= dt
+	}
+	if total > 0 {
+		r.RadiatorW = radiatorJ / total
 	}
 }
 

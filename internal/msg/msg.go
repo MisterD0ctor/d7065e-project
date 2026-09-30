@@ -34,6 +34,10 @@ type Truth struct {
 	Occupancy int     `json:"occupancy"`
 	Airflow   float64 `json:"airflow_ls"`
 	Setpoint  float64 `json:"setpoint_c"`
+	// Power in the step that ended at ModelTime (W), for the energy proxy.
+	FanW      float64 `json:"fan_w"`
+	AHUHeatW  float64 `json:"ahu_heat_w"`
+	RadiatorW float64 `json:"radiator_w"`
 }
 
 // Decision is the controller's record for one room and period (IF-6), on

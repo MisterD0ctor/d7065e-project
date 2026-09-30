@@ -33,6 +33,9 @@ type roomTruth struct {
 	Occupancy int     `json:"occupancy"`
 	Airflow   float64 `json:"airflow_ls"`
 	Setpoint  float64 `json:"setpoint_c"`
+	FanW      float64 `json:"fan_w"`
+	AHUHeatW  float64 `json:"ahu_heat_w"`
+	RadiatorW float64 `json:"radiator_w"`
 }
 
 type snapshot struct {
@@ -203,6 +206,7 @@ func (s *sim) publish(t time.Time) {
 		snap.Rooms[k.String()] = roomTruth{
 			CO2: m.CO2, Temp: m.Temp, Occupancy: in.Occupancy,
 			Airflow: in.AirflowLs, Setpoint: in.Setpoint,
+			FanW: m.FanW, AHUHeatW: m.AHUHeatW, RadiatorW: m.RadiatorW,
 		}
 	}
 	s.mu.Lock()
@@ -220,6 +224,7 @@ func (s *sim) publish(t time.Time) {
 			RunID: s.runID, Room: k.String(), ModelTime: snap.ModelTime,
 			CO2: r.CO2, Temp: r.Temp, Occupancy: r.Occupancy,
 			Airflow: r.Airflow, Setpoint: r.Setpoint,
+			FanW: r.FanW, AHUHeatW: r.AHUHeatW, RadiatorW: r.RadiatorW,
 		})
 	}
 }

@@ -71,3 +71,19 @@ func TestHeatingHoldsSetpoint(t *testing.T) {
 		t.Fatalf("settled at %.2f °C, want 21 ±0.5", r.Temp)
 	}
 }
+
+// The energy proxy rises with airflow: more ventilation, more fan power and
+// more heating of outdoor air.
+func TestEnergyFollowsAirflow(t *testing.T) {
+	size := sizing.For(80)
+	low, high := New(size), New(size)
+	low.Step(time.Hour, Inputs{AirflowLs: size.Empty, Setpoint: 21})
+	high.Step(time.Hour, Inputs{AirflowLs: size.Max, Setpoint: 21})
+	if high.FanW <= low.FanW || high.AHUHeatW <= low.AHUHeatW {
+		t.Fatalf("max flow: fan %.0f W, AHU %.0f W; min flow: fan %.0f W, AHU %.0f W",
+			high.FanW, high.AHUHeatW, low.FanW, low.AHUHeatW)
+	}
+	if low.RadiatorW <= 0 {
+		t.Error("an 8 °C day at 21 °C should need some radiator power")
+	}
+}
