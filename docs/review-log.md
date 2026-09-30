@@ -4,6 +4,15 @@ Two things the oral exam asks about (Lecture 1, slide 55): where AI advice was
 wrong and how we caught it, and why the design looks the way it does. Add an
 entry whenever either happens. Newest first.
 
+## 2026-09-30: first slice running
+
+| Finding | How it was caught | Fix |
+|---|---|---|
+| The clock client read `.clock`; occupancysim nests it under `.sim.clock`. Unit tests passed because nothing tested the real shape | Running the stack: physics logged no model time | Parse `.sim.clock`; `clock_test.go` now uses the real response shape |
+| Sizing by area alone treated fika room `1570` (101 m²) as a lecture room: capacity 50, design flow 385 l/s instead of 25 and 210 l/s | Comparing with occupancysim's `/api/state`, which lists each room's role and capacity | Capacities come from occupancysim at start (IF-1); the area rule is only the fallback |
+| The controller has no model time over REST, so it can't stamp `issued_at` | Writing the controller | TTL counts from acceptance until observations carry model time (IF-8) |
+| Observed: with the reactive policy, 16 people at fika lifted CO₂ to ~640 ppm, and it stayed there for over an hour after they left (τ ≈ 2 h at the occupied minimum) | First run, room `level0/1570` | None needed: this is the lag the predictor is meant to beat. Keep the plot for the report |
+
 ## 2026-09-30: design checked against the lecture slides and course repo
 
 Sources: Lecture 1 and 2 slides, course repo `eislab-cps/D7065E` @ `80a4c59`

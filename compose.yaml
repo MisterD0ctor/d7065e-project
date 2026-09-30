@@ -32,3 +32,47 @@ services:
       buildsim:
         condition: service_healthy
     restart: unless-stopped
+
+  # ---- Ventilation Control: first slice (one room, REST only) ----
+  # One Dockerfile builds every service; CMD picks the ./cmd/<name> to build.
+  # ROOMS lists the rooms as <level>/<room>; the first slice uses one.
+
+  physics:
+    build: { context: ., args: { CMD: physics } }
+    environment: &common
+      ROOMS: level0/1570   # a fika room: breaks around 09:45 and 14:30
+      RUN_ID: dev
+      BUILDSIM_URL: http://buildsim:9090
+      CLOCK_URL: http://occupancysim:8081
+    depends_on:
+      buildsim: { condition: service_healthy }
+      occupancysim: { condition: service_started }
+    restart: unless-stopped
+
+  sensor-co2:
+    build: { context: ., args: { CMD: sensor } }
+    environment:
+      <<: *common
+      KIND: co2
+      PHYSICS_URL: http://physics:8080
+      FAULTS: ""   # e.g. "stuck:level0/1570" or "drift:level0/1570:+50"
+    depends_on: [physics]
+    restart: unless-stopped
+
+  actuator-damper:
+    build: { context: ., args: { CMD: actuator } }
+    environment:
+      <<: *common
+      KIND: damper
+    depends_on:
+      buildsim: { condition: service_healthy }
+    restart: unless-stopped
+
+  controller:
+    build: { context: ., args: { CMD: controller } }
+    environment:
+      <<: *common
+      POLICY: ${POLICY:-reactive}   # constant | reactive
+      DAMPER_URL: http://actuator-damper:8080
+    depends_on: [actuator-damper]
+    restart: unless-stopped

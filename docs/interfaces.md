@@ -8,8 +8,8 @@ slide 34). Decisions and requirement IDs refer to
 Conventions for every interface:
 - **Rooms** are always keyed `<level>/<room>`, e.g. `level0/A109`. Room names
   repeat between floors, so a bare `A109` is a bug.
-- **Model time** is RFC 3339 without a zone, taken from occupancysim's clock,
-  e.g. `2026-09-14T10:15:00`. Wall time is used only for network timeouts.
+- **Model time** is RFC 3339 exactly as occupancysim's clock gives it, e.g.
+  `2026-09-14T10:15:00Z`. Wall time is used only for network timeouts.
 - **Run id**: every service gets `RUN_ID` from its environment and puts it in
   every record it publishes or stores.
 - Values we write to BuildSim are **strings** (BuildSim's rule). Values on MQTT
@@ -35,8 +35,14 @@ Overview:
 
 ## IF-1. Model clock
 
-`GET http://occupancysim:8081/api/state` → `.clock`
-(`time`, `minute_of_day`, `weekday`, `factor`, `running`).
+`GET http://occupancysim:8081/api/state` → `.sim.clock`
+(`time`, `minute_of_day`, `weekday`, `weekend`, `factor`, `running`).
+
+The same response lists `.sim.rooms[]` with each room's role and `capacity`.
+Physics, the actuators and the controller read the capacities **once at
+start** to size the ventilation, because occupancysim decides which rooms are
+fika rooms (4 m² per person) and which are lecture rooms (2 m²). Without
+occupancysim they estimate the capacity from the area.
 
 - **Rate:** physics reads it every tick (1 s real); actuators every tick too.
 - **Stale:** if the clock doesn't advance for 10 s real while `running` is
@@ -204,6 +210,10 @@ Published on every change, not every tick.
 - **Rate:** at most one command per room per control period.
 - **TTL:** if no valid command arrives within `ttl_s`, the actuator reverts to
   design flow (damper) or 21 °C (heating) and publishes `ttl_expired`.
+- **`issued_at` is optional while observations come over REST.** The
+  controller has no model time until IF-4 carries it, so the TTL counts from
+  the model time at which the actuator *accepted* the command. Once IF-4
+  exists, the controller sends `issued_at` = the observation's `model_time`.
 - **On failure (controller side):** timeout 500 ms, retry the **same**
   `cmd_id` up to 3 times. Idempotency makes this safe.
 
