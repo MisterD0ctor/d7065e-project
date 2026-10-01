@@ -4,6 +4,16 @@ Two things the oral exam asks about (Lecture 1, slide 55): where AI advice was
 wrong and how we caught it, and why the design looks the way it does. Add an
 entry whenever either happens. Newest first.
 
+## 2026-10-01: evaluation run
+
+Results in [evaluation-results.md](evaluation-results.md).
+
+| Finding | How it was caught | Fix |
+|---|---|---|
+| The evaluator showed *negative* fan and AHU energy for `eval-constant` | Implausible numbers in the first table | Each run ends with a stray truth record at Mon 00:00 (the next run reset the clock before this run's physics was replaced); its gap to the previous record was −5 days. Records earlier than a room's previous one are now skipped |
+| Mean absolute error made the predictor look worse than "same as now" | Reading the first accuracy table | Added arrivals foreseen and false alarms: the forecast foresees 72 % of fika arrivals, which MAE hides |
+| The PC slept mid-run | `eval-constant` took 1 h 38 min instead of 1 h | One 16 model-minute gap (Fri night, empty building); reported as a caveat. Keep the PC awake during runs |
+
 ## 2026-09-30: predictor, predictive and oracle policies
 
 - `train` builds the per-room weekday profile from the occupancy **sensor**

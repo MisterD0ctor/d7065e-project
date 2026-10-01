@@ -115,6 +115,7 @@ type runResult struct {
 	byRole   map[string]*tally
 	hourly   map[string]map[int][2]float64 // role → hour of week → (sum CO₂, n)
 	expected int                           // room-minutes in the span
+	step     time.Duration                 // mean model time between records
 }
 
 func evaluateRun(storage, run string, roles map[string]string) (runResult, error) {
@@ -129,10 +130,17 @@ func evaluateRun(storage, run string, roles map[string]string) (runResult, error
 		if err != nil {
 			return
 		}
+		// A record earlier than the room's previous one is the stray written
+		// when the next run reset the clock before this run's physics was
+		// replaced: it doesn't belong to this run's span.
+		p, seen := last[r.Room]
+		if seen && !t.After(p) {
+			return
+		}
 		// Energy over the gap since this room's previous record, capped so a
 		// pause in the run doesn't count as hours of power.
 		dt := time.Minute
-		if p, ok := last[r.Room]; ok {
+		if seen {
 			dt = min(t.Sub(p), 5*time.Minute)
 		}
 		last[r.Room] = t
@@ -158,6 +166,7 @@ func evaluateRun(storage, run string, roles map[string]string) (runResult, error
 	})
 	res.rooms = len(last)
 	res.expected = res.rooms * int(res.to.Sub(res.from).Minutes()+1)
+	res.step = res.to.Sub(res.from) / time.Duration(max(res.all.minutes/max(res.rooms, 1)-1, 1))
 	return res, err
 }
 
@@ -171,19 +180,21 @@ func pct(a, b int) string {
 func printRuns(rs []runResult) {
 	fmt.Println("## Runs")
 	fmt.Println()
-	fmt.Println("| Run | Span (model time) | Rooms | Complete | CO₂ ≤ 1000 (NFR-1) | 20–24 °C (NFR-2) | Occupied min > 1000 | Max CO₂ | Energy kWh (fan + AHU + radiator) |")
+	fmt.Println("Shares count truth records; at factor 120 there is one per room every ~2 model-minutes, so \"records\" below are ~2-minute samples.")
+	fmt.Println()
+	fmt.Println("| Run | Span (model time) | Rooms | Record step | CO₂ ≤ 1000 (NFR-1) | 20–24 °C (NFR-2) | Occupied records > 1000 ppm | Max CO₂ | Energy kWh (fan + AHU + radiator) |")
 	fmt.Println("|---|---|---|---|---|---|---|---|---|")
 	for _, r := range rs {
 		a := r.all
-		fmt.Printf("| %s | %s … %s | %d | %s | %s | %s | %d | %.0f ppm | %.0f (%.0f + %.0f + %.0f) |\n",
-			r.run, r.from.Format("Mon 02 15:04"), r.to.Format("Mon 02 15:04"), r.rooms,
-			pct(a.minutes, r.expected), pct(a.co2OK, a.occupied), pct(a.comfortOK, a.occupied),
+		fmt.Printf("| %s | %s … %s | %d | %.1f min | %s | %s | %d | %.0f ppm | %.0f (%.0f + %.0f + %.0f) |\n",
+			r.run, r.from.Format("Mon 02 15:04"), r.to.Format("Mon 02 15:04"), r.rooms, r.step.Minutes(),
+			pct(a.co2OK, a.occupied), pct(a.comfortOK, a.occupied),
 			a.over1000, a.maxCO2, a.fanKWh+a.ahuKWh+a.radKWh, a.fanKWh, a.ahuKWh, a.radKWh)
 	}
 	fmt.Println()
 	fmt.Println("## By room role")
 	fmt.Println()
-	fmt.Println("| Run | Role | Occupied room-min | CO₂ ≤ 1000 | 20–24 °C | Min > 1000 | Energy kWh |")
+	fmt.Println("| Run | Role | Occupied records | CO₂ ≤ 1000 | 20–24 °C | Records > 1000 ppm | Energy kWh |")
 	fmt.Println("|---|---|---|---|---|---|---|")
 	for _, r := range rs {
 		var roles []string
@@ -251,9 +262,15 @@ func accuracy(storage, run string, roles map[string]string) error {
 	if err != nil {
 		return err
 	}
+	// An arrival is the count rising by at least arrivalRise within the lead
+	// time. Forecasting is for warning ahead of arrivals, which "same as now"
+	// by definition never does; mean error alone hides that.
+	const arrivalRise = 5
 	type errs struct {
-		model, naive float64
-		n            int
+		model, naive               float64
+		n                          int
+		arrivals, foreseen, alarms int // alarms: forecast a rise that didn't come
+		quiet                      int // readings with no arrival ahead
 	}
 	byRole := map[string]*errs{}
 	for room, s := range series {
@@ -269,6 +286,9 @@ func accuracy(storage, run string, roles map[string]string) error {
 			}
 			forecast := max(r.n, model.Expected(room, r.t, lead))
 			role := roles[room]
+			if role == "" {
+				role = "room"
+			}
 			if byRole[role] == nil {
 				byRole[role] = &errs{}
 			}
@@ -276,13 +296,25 @@ func accuracy(storage, run string, roles map[string]string) error {
 			e.model += abs(forecast - actual)
 			e.naive += abs(r.n - actual)
 			e.n++
+			warned := forecast-r.n >= arrivalRise
+			if actual-r.n >= arrivalRise {
+				e.arrivals++
+				if warned {
+					e.foreseen++
+				}
+			} else {
+				e.quiet++
+				if warned {
+					e.alarms++
+				}
+			}
 		}
 	}
 	fmt.Printf("## Predictor accuracy (T-06): model %s on held-out run %s\n\n", model.Name, run)
-	fmt.Println("Mean absolute error of the peak count within 20 min, weekdays 07–18.")
+	fmt.Println("At each occupancy reading on weekdays 07–18: the peak count within the next 20 min, against the forecast (count now, or the profile's 80 % quantile if higher) and the naive \"same as now\". An arrival is a rise of ≥ 5 people within the 20 min; \"same as now\" foresees none by definition.")
 	fmt.Println()
-	fmt.Println("| Role | Readings | Forecast MAE | Naive MAE |")
-	fmt.Println("|---|---|---|---|")
+	fmt.Println("| Role | Readings | Forecast MAE | Naive MAE | Arrivals | Foreseen | False alarms |")
+	fmt.Println("|---|---|---|---|---|---|---|")
 	var names []string
 	for r := range byRole {
 		names = append(names, r)
@@ -290,7 +322,8 @@ func accuracy(storage, run string, roles map[string]string) error {
 	sort.Strings(names)
 	for _, role := range names {
 		e := byRole[role]
-		fmt.Printf("| %s | %d | %.2f | %.2f |\n", role, e.n, e.model/float64(e.n), e.naive/float64(e.n))
+		fmt.Printf("| %s | %d | %.2f | %.2f | %d | %s | %s |\n", role, e.n, e.model/float64(e.n), e.naive/float64(e.n),
+			e.arrivals, pct(e.foreseen, e.arrivals), pct(e.alarms, e.quiet))
 	}
 	fmt.Println()
 	return nil
