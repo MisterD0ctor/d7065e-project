@@ -7,7 +7,7 @@ vars: {
 direction: down
 
 bs: "BuildSim\n[Software System, from course]\nShared state: sensor values,\nactuator state, 3D viewer"
-occ: "occupancysim\n[Software System, course example]\nPeople and the model clock" {
+occ: "occupancysim\n[Software System, course example, modified]\nPeople and the model clock" {
   style.stroke-dash: 4
 }
 installer: "Installer\n[Person]\nMounts and registers devices" {
@@ -37,8 +37,8 @@ sys: "Ventilation Control  [System]" {
 
 installer -> sys.registry: "Registers id, kind, room [REST / web form]"
 occ -> bs: "Occupancy, entities [REST]"
-occ -> sys.physics: "Model clock [REST]"
-bs -> sys.physics: "Occupancy, actuator state [REST]"
+occ -> sys.physics: "Clock, occupancy per minute [REST]"
+bs -> sys.physics: "Actuator state [REST]"
 sys.sensors -> sys.registry: "Check in, learn room [REST]"
 sys.actuators -> sys.registry: "Check in, advertise address [REST]"
 sys.controller -> sys.registry: "Rooms, actuator addresses [REST]"

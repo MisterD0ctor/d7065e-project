@@ -25,7 +25,7 @@ post "{\"date\": \"$start\", \"time\": \"00:00\", \"factor\": $factor}"
 
 log "starting the stack with POLICY=$policy"
 t0=$(date -u +%s)
-RUN_ID=$run_id POLICY=$policy ORACLE_RUN=$oracle_run docker compose up -d >/dev/null
+RUN_ID=$run_id POLICY=$policy ORACLE_RUN=$oracle_run docker compose up -d >/dev/null 2>&1
 
 # Wait until every device has checked in since the recreate.
 want=$(($(wc -l < deploy/devices.csv) - 1))

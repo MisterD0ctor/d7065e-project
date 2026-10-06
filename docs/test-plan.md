@@ -34,15 +34,16 @@ under load), **eval** (full evaluation runs).
 | T-22 | Load: 50 rooms, then 100, 200, … until a sample cycle overruns | perf | NFR-5, D-3 | 50 rooms fits one sample period; report the breaking point and what broke first |
 | T-23 | Chaos: `docker kill` each of our containers in turn during a run | fault | NFR-6 | No unsafe state; loop resumes within 30 s real; gap visible in storage |
 | T-24 | Broker down: stop `mosquitto` for 5 min | fault | NFR-6, D-3 | Controller falls back to polling BuildSim; resumes MQTT afterwards |
-| T-25 | Reproducibility: two runs with the same seed and dates | integration | NFR-7, D-7 | True occupancy identical, room by room, minute by minute |
+| T-25 | Reproducibility, three ways. (a) occupancysim driven by a steady and by a wildly irregular clock (`minutes_test.go`). (b) Physics given the same minutes one per tick and in bursts (`world_test.go`). (c) Two runs of the same Monday morning at factor 600 and factor 120, truth compared record by record | unit + integration | NFR-7, D-1, D-7 | (a) and (b): identical occupancy and identical room state. (c): the same head-count and guard count in every room at every minute |
 | T-26 | Timed evaluation run | eval | NFR-8 | One baseline over 5 simulated weekdays in ≤ 2.5 h real |
-| T-27 | Truth boundary: controller tries to subscribe to `truth/#` and call the truth API | integration | §0 scope, C-1 | Both refused (Mosquitto ACL; no network route) |
+| T-27 | Truth boundary: the controller's login tries to subscribe to `truth/#` | integration | §0 scope, C-1 | Receives nothing (Mosquitto ACL). The truth API on physics is not yet closed to the controller at network level (IF-2) |
 | T-28 | Start a device that no installer has registered | integration | FR-11, D-10 | It publishes nothing and accepts no commands; once registered it starts within 5 s |
 | T-29 | Installer mistakes: a room not in the floor plan, an unknown kind, an id already taken | unit + integration | FR-11, D-10 | 422, 422, 409; nothing stored |
 | T-30 | Retire a device | integration | FR-11, D-10 | It stops reporting at its next check-in (≤ 30 s); its equipment leaves BuildSim |
 | T-31 | Register a CO₂ sensor's id as a damper, then start the sensor | integration | D-10 | The device refuses to start and says the registry entry is wrong |
 | T-32 | Policies differ only where they should (`policy_test.go`) | unit | FR-9 | Constant = design flow; reactive ignores people; predictive ventilates for expected people in clean air and still reacts to CO₂; flows capped at the room's maximum |
 | T-33 | The live run's truth over the storage API | integration | §0 scope | `403`; a finished run's truth is served (for the oracle) |
+| T-34 | Optimal start of the heating (`heating_test.go`): a cold room before a weekday morning, a room warming faster than assumed, a warm room, a weekend, a clock moved back | unit + integration | NFR-2, D-6 | The setback ends 2 h 15 min before 07:00 for a room at 18 °C and not a minute earlier; the pre-heat doesn't flip back; warm rooms and weekends stay in setback. Live: rooms are at or above 20 °C at 07:00 |
 
 T-22 is the grade-5 test ("finds the limits", Lecture 1, slide 53): report
 where the system stops working, not only that 50 rooms work.

@@ -33,3 +33,19 @@ func TestFloorFollowsSchedule(t *testing.T) {
 		t.Error("nights and weekends should use the unoccupied floor")
 	}
 }
+
+func TestNextOccupiedStart(t *testing.T) {
+	at := func(day, hour int) time.Time { return time.Date(2026, 9, day, hour, 0, 0, 0, time.UTC) }
+	for name, tc := range map[string]struct{ now, want time.Time }{
+		"early Tuesday":        {at(22, 3), at(22, 7)},
+		"exactly at the start": {at(22, 7), at(23, 7)}, // strictly after
+		"Tuesday afternoon":    {at(22, 12), at(23, 7)},
+		"Friday evening":       {at(25, 18), at(28, 7)}, // skips the weekend
+		"Saturday":             {at(26, 12), at(28, 7)},
+		"Sunday night":         {at(27, 23), at(28, 7)},
+	} {
+		if got := NextOccupiedStart(tc.now); !got.Equal(tc.want) {
+			t.Errorf("%s: %v, want %v", name, got, tc.want)
+		}
+	}
+}

@@ -1,32 +1,41 @@
 #!/usr/bin/env bash
 # The full evaluation (report §11): a training week, the model, then the four
-# baselines over the same held-out week. Takes ~4.5 h at factor 120.
+# baselines over the same held-out week. Five runs of about an hour each at
+# factor 120.
 #
-#   deploy/evaluate-all.sh 2>&1 | tee results/evaluate-all.log
+#   SUFFIX=-v2 deploy/evaluate-all.sh 2>&1 | tee results/evaluate-all-v2.log
+#
+# SUFFIX names this evaluation: storage appends to a run id, so repeating an
+# evaluation under the same names would mix its records into the earlier one.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+suffix=${SUFFIX:-}
 train_start=2026-09-14   # Mon; the training week
 eval_start=2026-09-21    # Mon; held out from training
 days=5
 factor=${FACTOR:-120}
+# The training week runs at the same speed as the evaluation by default, so
+# the occupancy sensors report every model minute there too. Occupancy doesn't
+# depend on the controller, so a higher TRAIN_FACTOR only thins the readings.
+train_factor=${TRAIN_FACTOR:-$factor}
 
-# Occupancy doesn't depend on the controller, so the training week can run
-# faster than the evaluation.
-deploy/evaluate.sh train-week reactive "$train_start" "$days" 300
+deploy/evaluate.sh "train-week$suffix" reactive "$train_start" "$days" "$train_factor"
 
-echo "$(date +%T) training on train-week"
-TRAIN_RUNS=train-week MODEL_NAME=profile-train-week docker compose run --rm --no-deps train
+echo "$(date +%T) training on train-week$suffix"
+TRAIN_RUNS="train-week$suffix" MODEL_NAME="profile-train-week$suffix" \
+  docker compose run --rm --no-deps train 2>&1 | { grep -v '^ Container ' || true; }
 
-deploy/evaluate.sh eval-reactive   reactive   "$eval_start" "$days" "$factor"
-deploy/evaluate.sh eval-constant   constant   "$eval_start" "$days" "$factor"
-deploy/evaluate.sh eval-predictive predictive "$eval_start" "$days" "$factor"
-deploy/evaluate.sh eval-oracle     oracle     "$eval_start" "$days" "$factor" eval-reactive
+deploy/evaluate.sh "eval-reactive$suffix"   reactive   "$eval_start" "$days" "$factor"
+deploy/evaluate.sh "eval-constant$suffix"   constant   "$eval_start" "$days" "$factor"
+deploy/evaluate.sh "eval-predictive$suffix" predictive "$eval_start" "$days" "$factor"
+deploy/evaluate.sh "eval-oracle$suffix"     oracle     "$eval_start" "$days" "$factor" "eval-reactive$suffix"
 
 # Park the stack on a run of its own, so every eval run's truth can be read.
-RUN_ID=idle POLICY=reactive docker compose up -d >/dev/null
+RUN_ID=idle POLICY=reactive docker compose up -d >/dev/null 2>&1
 
 mkdir -p results
-go run ./cmd/evaluate -runs eval-constant,eval-reactive,eval-predictive,eval-oracle \
-  -accuracy-run eval-reactive -out results | tee results/evaluation.md
+go run ./cmd/evaluate \
+  -runs "eval-constant$suffix,eval-reactive$suffix,eval-predictive$suffix,eval-oracle$suffix" \
+  -accuracy-run "eval-reactive$suffix" -out results | tee "results/evaluation$suffix.md"
 echo "$(date +%T) evaluation finished"

@@ -158,6 +158,7 @@ All of these can be changed in the UI or in the config file.
 | Method and path | Purpose |
 |---|---|
 | `GET /api/state` | Clock, counts, rooms, lectures, today's occupancy curve, people, BuildSim status |
+| `GET /api/minutes?after=<RFC 3339>` | Who was in each room at every whole simulated minute after `after` (without it: the newest minute), oldest first, with the clock. `{"clock": {…}, "minutes": [{"time": "…", "rooms": {"level0/1570": {"occupants": 16, "guards": 0}}}]}`. Rooms with nobody and corridors are left out; the last 240 minutes of the day are kept. The sequence depends only on the day's plan, so it is identical in every run of a date (project addition, see `../README.md`) |
 | `GET /api/events` | The same as server-sent events, once per second |
 | `GET /api/config`, `PUT /api/config` | Read or replace the parameters; a `PUT` regenerates the current day |
 | `GET /api/defaults` | The default parameters |

@@ -31,7 +31,8 @@ type Truth struct {
 	ModelTime string  `json:"model_time"`
 	CO2       float64 `json:"co2_ppm"`
 	Temp      float64 `json:"temp_c"`
-	Occupancy int     `json:"occupancy"`
+	Occupancy int     `json:"occupancy"` // everyone in the room, guards included
+	Guards    int     `json:"guards"`    // of whom night guards on patrol
 	Airflow   float64 `json:"airflow_ls"`
 	Setpoint  float64 `json:"setpoint_c"`
 	// Power in the step that ended at ModelTime (W), for the energy proxy.

@@ -68,6 +68,18 @@ POLICY=oracle ORACLE_RUN=eval-reactive docker compose up -d controller # replay 
 The oracle must replay a run of the **same seed and dates**. Storage refuses
 the live run's truth, so it can only ever read a finished run.
 
+### Evaluation
+
+```
+SUFFIX=-v2 deploy/evaluate-all.sh 2>&1 | tee results/evaluate-all-v2.log
+```
+
+A training week, the model, then the four policies over the same held-out
+week: five runs of about an hour each at factor 120, then `cmd/evaluate`
+prints the tables (docs/evaluation-results.md). Pick a new `SUFFIX` each time,
+keep the PC awake (`systemd-inhibit --what=sleep:idle deploy/evaluate-all.sh`),
+and don't restart containers while it runs.
+
 ### While developing
 
 ```
@@ -83,11 +95,11 @@ curl -X POST localhost:8081/api/clock -H 'Content-Type: application/json' -d '{"
 
 | Service | Code | What it does |
 |---|---|---|
-| `physics` | `cmd/physics` | CO₂ and heat balance per room; serves the truth to the sensors; relays the model time |
+| `physics` | `cmd/physics` | CO₂ and heat balance per room, stepped one model minute at a time from occupancysim's per-minute occupancy; serves the truth to the sensors; relays the model time |
 | `registry` | `cmd/registry` | Installed devices (SQLite); installer's form; keeps BuildSim's equipment list in step |
 | `co2-0001`, `temp-0001`, … | `cmd/sensor` | One sensor device each: samples its room, adds noise and faults, writes to BuildSim and MQTT |
 | `damper-0001`, `heat-0001`, … | `cmd/actuator` | One actuator device each: validates commands, enforces the safety limits, travels, reports |
-| `controller` | `cmd/controller` | Finds rooms and actuators in the registry; reads observations from MQTT (BuildSim as fallback); decides and commands |
+| `controller` | `cmd/controller` | Finds rooms and actuators in the registry; reads observations from MQTT (BuildSim as fallback); decides airflow by policy and heating by schedule with pre-heat; commands the actuators |
 | `storage` | `cmd/storage` | Records every MQTT message as JSONL per run; serves history and models |
 | `mosquitto` | `deploy/mosquitto` | MQTT broker; its ACL keeps `truth/#` for storage only |
 

@@ -38,10 +38,6 @@ const (
 	ReactiveLow  = 600.0
 	ReactiveHigh = 1000.0
 
-	// Heating: comfort setpoint in occupied hours, setback otherwise.
-	ComfortSetpoint = 21.0
-	SetbackSetpoint = 18.0
-
 	CommandTTL   = 300 // model seconds: five missed readings
 	StaleAfter   = 180 * time.Second
 	RefreshPlant = 30 * time.Second // how often to re-read the registry
@@ -84,6 +80,8 @@ type controller struct {
 
 	forecast forecast         // predictive and oracle only
 	profile  *profileForecast // predictive only, for reloading
+
+	heat optimalStart // heating schedule with pre-heat, the same for every policy
 }
 
 func main() {
@@ -321,11 +319,7 @@ func (c *controller) act(ctx context.Context, k rooms.Key, kind string, value fl
 		}
 	case rooms.Temp:
 		endpoint, unit = p.heating, "°C"
-		target = SetbackSetpoint
-		if sizing.OccupiedHours(t) {
-			target = ComfortSetpoint
-		}
-		reason = fmt.Sprintf("schedule: %.1f °C measured", value)
+		target, reason = c.heat.Setpoint(k, t, value)
 	default:
 		return
 	}

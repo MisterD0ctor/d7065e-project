@@ -96,9 +96,35 @@ type Simulation struct {
 	people           []*Person // every person on every floor, for counts and snapshots
 	samples          []Sample
 	lastSampleMinute int
+
+	carry   time.Duration     // simulated time owed that is less than one gridStep
+	minutes []MinuteOccupancy // who was where at each recent whole minute, oldest first
 }
 
-const maxStepSeconds = 10.0
+// gridStep is the fixed step of the simulation. The clock only ever sits on
+// multiples of it and every step is exactly this long, so the state at a given
+// simulated time is the same in every run of the same day, however the wall
+// clock that drives Advance jitters. (Before, the step followed the wall-clock
+// tick, and two runs of one day differed by a few seconds here and there.)
+const gridStep = 5 * time.Second
+
+// minuteLogSize is how many whole-minute snapshots are kept for readers.
+const minuteLogSize = 240
+
+// MinuteOccupancy is who was in each room at one whole simulated minute. It is
+// taken exactly on the minute, so it depends only on the day's plan: the same
+// seed and date give the same sequence in every run.
+type MinuteOccupancy struct {
+	Time  time.Time            `json:"time"`
+	Rooms map[string]RoomCount `json:"rooms"` // "<level>/<room>"; empty rooms and corridors are left out
+}
+
+// RoomCount counts a room's occupants. Guards are counted in Occupants and
+// again in Guards, so a reader can tell a patrol from a room being in use.
+type RoomCount struct {
+	Occupants int `json:"occupants"`
+	Guards    int `json:"guards,omitempty"`
+}
 
 // entrance is a configured entrance snapped to the walkable graph.
 type entrance struct {
@@ -122,8 +148,8 @@ func New(plans []FloorPlan, params Parameters, start time.Time) (*Simulation, er
 	if err := s.configure(params); err != nil {
 		return nil, err
 	}
-	s.now = start
-	s.regenerate(start)
+	s.now = start.Truncate(gridStep)
+	s.regenerate(s.now)
 	return s, nil
 }
 
@@ -244,6 +270,11 @@ func (s *Simulation) regenerate(t time.Time) {
 	}
 	s.samples = s.samples[:0]
 	s.lastSampleMinute = -1
+	s.carry = 0
+	s.minutes = s.minutes[:0]
+	if s.now.Second() == 0 {
+		s.recordMinute()
+	}
 }
 
 // quota is one floor's share of the building population for a day.
@@ -338,17 +369,19 @@ func (s *Simulation) Advance(d time.Duration) {
 }
 
 func (s *Simulation) advanceLocked(d time.Duration) {
-	target := s.now.Add(d)
-	for s.now.Before(target) {
-		step := min(target.Sub(s.now), time.Duration(maxStepSeconds*float64(time.Second)))
-		next := s.now.Add(step)
+	s.carry += d
+	units := s.params.WalkingSpeedMps / s.params.MetresPerUnit * gridStep.Seconds()
+	for s.carry >= gridStep {
+		s.carry -= gridStep
+		next := s.now.Add(gridStep)
 		if midnight(next) != s.day {
 			s.now = midnight(next)
+			carry := s.carry
 			s.regenerate(s.now)
+			s.carry = carry
 			continue
 		}
 		minute := minuteOfDay(s.now)
-		units := s.params.WalkingSpeedMps / s.params.MetresPerUnit * step.Seconds()
 		for _, f := range s.floors {
 			for _, p := range f.people {
 				s.stepPerson(f, p, minute, units)
@@ -359,7 +392,63 @@ func (s *Simulation) advanceLocked(d time.Duration) {
 			s.lastSampleMinute = whole
 			s.samples = append(s.samples, s.sample(whole))
 		}
+		if s.now.Second() == 0 {
+			s.recordMinute()
+		}
 	}
+}
+
+// recordMinute appends the occupancy at the current time, which is a whole
+// minute, to the log.
+func (s *Simulation) recordMinute() {
+	snap := MinuteOccupancy{Time: s.now, Rooms: map[string]RoomCount{}}
+	for _, f := range s.floors {
+		for _, p := range f.people {
+			if p.state == StateOutside {
+				continue
+			}
+			room, known := f.roomByName[p.roomName]
+			if !known || room.Role == RoleCorridor {
+				continue
+			}
+			key := f.plan.Level + "/" + p.roomName
+			count := snap.Rooms[key]
+			count.Occupants++
+			if p.Role == RoleGuard {
+				count.Guards++
+			}
+			snap.Rooms[key] = count
+		}
+	}
+	if len(s.minutes) >= minuteLogSize {
+		s.minutes = append(s.minutes[:0], s.minutes[1:]...)
+	}
+	s.minutes = append(s.minutes, snap)
+}
+
+// Minutes returns the whole-minute occupancy recorded after the given time,
+// oldest first, together with the clock. A zero time returns only the newest
+// minute, which is where a new reader starts. The log holds the last
+// minuteLogSize minutes of the current day; a reader that falls further
+// behind sees a gap between its last minute and the first one returned.
+func (s *Simulation) Minutes(after time.Time) (ClockState, []MinuteOccupancy) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	clock := s.clockLocked()
+	if len(s.minutes) == 0 {
+		return clock, nil
+	}
+	if after.IsZero() {
+		return clock, []MinuteOccupancy{s.minutes[len(s.minutes)-1]}
+	}
+	first := len(s.minutes)
+	for i, m := range s.minutes {
+		if m.Time.After(after) {
+			first = i
+			break
+		}
+	}
+	return clock, append([]MinuteOccupancy(nil), s.minutes[first:]...)
 }
 
 func (s *Simulation) sample(minute int) Sample {
@@ -642,6 +731,8 @@ func (s *Simulation) SetRunning(running bool) {
 func (s *Simulation) SetTime(t time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	t = t.Truncate(gridStep)
+	s.carry = 0
 	if midnight(t) == s.day && !t.Before(s.now) {
 		s.advanceLocked(t.Sub(s.now))
 		return

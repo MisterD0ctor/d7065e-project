@@ -4,6 +4,83 @@ Two things the oral exam asks about (Lecture 1, slide 55): where AI advice was
 wrong and how we caught it, and why the design looks the way it does. Add an
 entry whenever either happens. Newest first.
 
+## 2026-10-06: heating, guards, and reproducible days
+
+Three follow-ups to the first evaluation. All three change what the
+evaluation measures, so its tables have to be regenerated
+(evaluation-results.md says which numbers are affected).
+
+**1. Cold rooms in the morning.** In `eval-reactive`, 195 of 7 011 occupied
+samples were below 20 °C, none above 24 °C:
+
+| When | Cold samples | Who | Cause |
+|---|---|---|---|
+| Night 18–05 | 108 | One person | Guards on patrol during the 18 °C setback |
+| Pre-dawn 05–07 | 54 | One person | Guards and the earliest staff, same setback |
+| Morning 07–09 | 33 | First arrivals | Heating switched to 21 °C at 07:00 sharp; rooms were at 17.9 °C and reached 20 °C about 08:13 |
+
+Fix: optimal start (D-6). Checked on six rooms, Mon–Tue of the evaluation
+week, reactive policy:
+
+| | Before | After |
+|---|---|---|
+| Room temperature at 07:00 | 17.9–18.1 °C | 20.9 °C |
+| Reaches 20 °C | ~08:10 | 05:37–06:01 |
+| Cold occupied samples 07–09 | 13 of 60 | 0 of 51 |
+| Cold occupied samples 05–07 | 9 of 9 | 0 of 9 |
+| Cold occupied samples at night | 5 of 11 | 5 of 11 |
+| Energy, six rooms | 190 kWh | 196 kWh (+3 %) |
+
+The pre-heat started between 04:23 and 05:15 depending on how cold each room
+was. Rooms are warm about an hour early, because the assumed warm-up rate
+(1.5 K/h) is slower than the rooms' real one (~1.8 K/h) and the target is the
+setpoint, not the edge of the comfort band. Learning the rate per room would
+trim that.
+
+**2. Guards.** The night samples are patrols, and heating an empty building
+for a five-minute visit would be the wrong fix. The measure changed instead:
+a room counts as occupied when someone other than a guard on patrol is in it
+(`cmd/evaluate`). Guard-only records are counted separately as patrols, so
+they stay visible. This needs the truth to say who is a guard, which it now
+does (IF-5, `guards`).
+
+**3. Runs of the same day were not identical** (NFR-7, T-25; details in
+D-7). Found while checking whether the before/after comparison above was
+like-for-like.
+
+| Finding | How it was caught | Fix |
+|---|---|---|
+| Two runs of the same dates agreed in only 99.6–99.7 % of samples; a fika group was 36 in one run and 23 in another at the same minute | Diffing the true occupancy of the four evaluation runs | occupancysim: fixed 5-second steps and a per-minute occupancy record. Physics: steps through those minutes instead of sampling BuildSim's occupancy on its own tick |
+| At factor 120 the truth had a sample only every 2 model-minutes (FR-2 says 60 s) | Same analysis: the runs didn't even share timestamps (the oracle run and the reactive run had 17 % in common) | Same change: physics computes every minute occupancysim recorded, at any speed |
+| Our first version of the occupancysim change replayed the day from midnight at start-up, and broke one of the simulator's own tests, which relies on everyone starting outside | Running occupancysim's test suite after the change | That part was dropped: setting the clock already replays the day, and every experiment sets the clock |
+| IF-2 claimed the controller has "no route" to physics. It shares the compose network with it | Re-reading the contract while editing it | The contract now says it is a convention, not enforced; listed as a limitation |
+
+Result of T-25 after the fix: the same Monday morning at factor 600 and at
+factor 120, 39 200 truth records in common (50 rooms × 784 minutes), **zero**
+differences in head-count, guard count, CO₂, temperature or radiator power.
+
+**Load after the change** (run `load120`: all 50 rooms, 257 containers,
+factor 120, Mon 07:00–10:30, reactive). With a truth record every model
+minute the sensors report twice as often as in the first evaluation: 300
+readings and 200 commands per real second.
+
+| Measure | Result |
+|---|---|
+| Truth, temperature and occupancy readings per model minute | 50 of 50 rooms in all 210 minutes |
+| CO₂ readings per model minute | 50 of 50 in 206 minutes, 49 in the other 4 (4 readings of 10 500 missed: a sensor polls every 250 ms and a model minute lasts 500 ms) |
+| Commands during the run | 21 362 sent, all accepted |
+| Readings the controller dropped as stale | 0 |
+| Records rejected by storage | 0 of 63 792 |
+
+So NFR-5 holds at 50 rooms with FR-2's 60-second sampling at factor 120,
+which the first evaluation did not have. (34 commands failed at 07:00, before
+the clock was started, while the actuators were still booting.)
+
+AI advice corrected here: the first evaluation write-up listed "same rooms,
+devices, dates and occupancysim seed" under fairness without having run T-25,
+which the design doc had said to verify "as soon as storage runs". It was
+only verified a week later, and failed.
+
 ## 2026-10-01: evaluation run
 
 Results in [evaluation-results.md](evaluation-results.md).

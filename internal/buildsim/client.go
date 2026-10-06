@@ -82,14 +82,6 @@ type Equipment struct {
 	Actuators []Actuator `json:"actuators"`
 }
 
-type Person struct {
-	ID string `json:"id"`
-}
-
-type RoomOccupancy struct {
-	Persons []Person `json:"persons"`
-}
-
 // Floor reads a floor plan. It is large (rooms plus the walkable graph), so
 // it gets more time than the other calls: under load, 2 s wasn't enough.
 func (c *Client) Floor(ctx context.Context, level string) (Floor, error) {
@@ -133,13 +125,6 @@ func (c *Client) SetSensorValue(ctx context.Context, sensorID, value string) err
 func (c *Client) SetActuatorState(ctx context.Context, actuatorID, state string) error {
 	body := map[string]string{"state": state}
 	return c.do(ctx, http.MethodPut, "/api/actuators/"+url.PathEscape(actuatorID)+"/state", body, nil)
-}
-
-// Occupancy returns the whole building's occupancy, keyed "<level>/<room>".
-func (c *Client) Occupancy(ctx context.Context) (map[string]RoomOccupancy, error) {
-	occ := map[string]RoomOccupancy{}
-	err := c.do(ctx, http.MethodGet, "/api/occupancy", nil, &occ)
-	return occ, err
 }
 
 func (c *Client) do(ctx context.Context, method, path string, in, out any) error {

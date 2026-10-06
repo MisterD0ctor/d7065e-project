@@ -75,6 +75,7 @@ type truthRecord struct {
 	CO2       float64 `json:"co2_ppm"`
 	Temp      float64 `json:"temp_c"`
 	Occupancy int     `json:"occupancy"`
+	Guards    *int    `json:"guards"` // nil in runs recorded before guards were counted
 	FanW      float64 `json:"fan_w"`
 	AHUHeatW  float64 `json:"ahu_heat_w"`
 	RadiatorW float64 `json:"radiator_w"`
@@ -82,14 +83,27 @@ type truthRecord struct {
 
 type tally struct {
 	minutes, occupied, co2OK, comfortOK int
-	over1000                            int // occupied minutes above 1000 ppm
+	over1000                            int // occupied records above 1000 ppm
+	patrol                              int // records with only guards in the room
 	maxCO2                              float64
 	fanKWh, ahuKWh, radKWh              float64
 }
 
+// add counts one record. A room is occupied when someone other than a night
+// guard on patrol is in it: NFR-1 and NFR-2 are about the people who work and
+// study in a room, and a guard passing through an empty building during the
+// heating setback is not what the comfort requirement is for. Guard-only
+// records are counted separately so nothing disappears from the table.
 func (t *tally) add(r truthRecord, dt time.Duration) {
 	t.minutes++
-	if r.Occupancy > 0 {
+	users := r.Occupancy
+	if r.Guards != nil {
+		users -= *r.Guards
+	}
+	if users <= 0 && r.Occupancy > 0 {
+		t.patrol++
+	}
+	if users > 0 {
 		t.occupied++
 		if r.CO2 <= 1000 {
 			t.co2OK++
@@ -116,6 +130,7 @@ type runResult struct {
 	hourly   map[string]map[int][2]float64 // role → hour of week → (sum CO₂, n)
 	expected int                           // room-minutes in the span
 	step     time.Duration                 // mean model time between records
+	guards   bool                          // the run recorded guards separately
 }
 
 func evaluateRun(storage, run string, roles map[string]string) (runResult, error) {
@@ -150,6 +165,9 @@ func evaluateRun(storage, run string, roles map[string]string) (runResult, error
 		if t.After(res.to) {
 			res.to = t
 		}
+		if r.Guards != nil {
+			res.guards = true
+		}
 		role := roles[r.Room]
 		if role == "" {
 			role = "room"
@@ -180,16 +198,20 @@ func pct(a, b int) string {
 func printRuns(rs []runResult) {
 	fmt.Println("## Runs")
 	fmt.Println()
-	fmt.Println("Shares count truth records; at factor 120 there is one per room every ~2 model-minutes, so \"records\" below are ~2-minute samples.")
+	fmt.Println("Shares count truth records of occupied rooms; \"Record step\" is the model time between a room's records. A room counts as occupied when someone other than a night guard on patrol is in it. Records with only guards in the room are listed as patrols and left out of the shares.")
 	fmt.Println()
-	fmt.Println("| Run | Span (model time) | Rooms | Record step | CO₂ ≤ 1000 (NFR-1) | 20–24 °C (NFR-2) | Occupied records > 1000 ppm | Max CO₂ | Energy kWh (fan + AHU + radiator) |")
-	fmt.Println("|---|---|---|---|---|---|---|---|---|")
+	fmt.Println("| Run | Span (model time) | Rooms | Record step | CO₂ ≤ 1000 (NFR-1) | 20–24 °C (NFR-2) | Occupied records > 1000 ppm | Max CO₂ | Patrol-only records | Energy kWh (fan + AHU + radiator) |")
+	fmt.Println("|---|---|---|---|---|---|---|---|---|---|")
 	for _, r := range rs {
 		a := r.all
-		fmt.Printf("| %s | %s … %s | %d | %.1f min | %s | %s | %d | %.0f ppm | %.0f (%.0f + %.0f + %.0f) |\n",
+		patrols := "not recorded (counted as occupied)"
+		if r.guards {
+			patrols = fmt.Sprint(a.patrol)
+		}
+		fmt.Printf("| %s | %s … %s | %d | %.1f min | %s | %s | %d | %.0f ppm | %s | %.0f (%.0f + %.0f + %.0f) |\n",
 			r.run, r.from.Format("Mon 02 15:04"), r.to.Format("Mon 02 15:04"), r.rooms, r.step.Minutes(),
 			pct(a.co2OK, a.occupied), pct(a.comfortOK, a.occupied),
-			a.over1000, a.maxCO2, a.fanKWh+a.ahuKWh+a.radKWh, a.fanKWh, a.ahuKWh, a.radKWh)
+			a.over1000, a.maxCO2, patrols, a.fanKWh+a.ahuKWh+a.radKWh, a.fanKWh, a.ahuKWh, a.radKWh)
 	}
 	fmt.Println()
 	fmt.Println("## By room role")

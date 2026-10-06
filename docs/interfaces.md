@@ -19,7 +19,7 @@ Overview:
 
 | ID | Interface | Owner (writer) | Readers | Protocol |
 |---|---|---|---|---|
-| IF-1 | Model clock | occupancysim; physics relays it on `time/model` | physics (REST); actuators (MQTT, REST fallback) | REST, MQTT |
+| IF-1 | Model clock and occupancy per minute | occupancysim; physics relays the time on `time/model` | physics (REST); actuators (MQTT, REST fallback) | REST, MQTT |
 | IF-2 | Truth API | physics | sensor devices only | REST |
 | IF-3 | Sensor readings in BuildSim | each sensor device | controller and damper (fallback), viewer | REST |
 | IF-4 | Observations `obs/…` | each sensor device | controller, damper, storage, viz | MQTT |
@@ -34,10 +34,36 @@ Overview:
 
 ---
 
-## IF-1. Model clock
+## IF-1. Model clock and occupancy per minute
 
 `GET http://occupancysim:8081/api/state` → `.sim.clock`
 (`time`, `minute_of_day`, `weekday`, `weekend`, `factor`, `running`).
+
+`GET http://occupancysim:8081/api/minutes?after=2026-09-21T10:14:00Z` → the
+clock, and who was in each room at every whole model minute after `after`,
+oldest first (without `after`: the newest minute only, where a reader starts):
+
+```json
+{
+  "clock": {"time": "2026-09-21T10:16:25Z", "factor": 120, "running": true},
+  "minutes": [
+    {"time": "2026-09-21T10:15:00Z", "rooms": {"level0/1570": {"occupants": 16}}},
+    {"time": "2026-09-21T10:16:00Z", "rooms": {"level0/1570": {"occupants": 17, "guards": 1}}}
+  ]
+}
+```
+
+- `occupants` counts everyone in the room; `guards` says how many of them
+  are night guards on patrol. Rooms with nobody, and corridors, are left out.
+- **Reproducible:** each entry is the state exactly on its minute, and
+  occupancysim advances in fixed 5-second steps, so the sequence depends only
+  on the day's plan. Every run of the same date gets the same minutes, at any
+  speed factor (NFR-7, T-25).
+- **Kept:** the last 240 minutes of the current day. A reader further behind
+  than that sees a gap and steps over it in one go.
+- This is our addition to occupancysim (`external/README.md`). Physics uses
+  it instead of BuildSim's `/api/occupancy`, which has no time attached and is
+  refreshed at most every 5 real seconds.
 
 The same response lists `.sim.rooms[]` with each room's role and `capacity`.
 Physics and the registry read the capacities **once** to size the ventilation,
@@ -51,37 +77,44 @@ Physics relays the time on MQTT every tick, as a retained message on
 distributes time. The actuators use that instead of each polling
 occupancysim, and poll occupancysim only while the relay is silent.
 
-- **Rate:** physics reads it every tick (1 s real).
-- **Stale:** if the clock doesn't advance for 10 s real while `running` is
-  true, physics stops stepping and logs it. It never extrapolates.
+- **Rate:** physics asks for new minutes every 250 ms real, which is shorter
+  than a model minute lasts up to factor 240.
+- **Stale:** a paused or stuck clock produces no new minutes, so physics does
+  not step. It never extrapolates. If the clock is moved back (a new
+  experiment), physics restarts from the newest minute.
 - **On failure:** timeout 500 ms. Physics holds its state and retries next
-  tick. Actuators keep their targets but can't expire commands until the clock
-  is back.
+  tick; the minutes it missed are still in the record. Actuators keep their
+  targets but can't expire commands until the time is back.
 
 ## IF-2. Truth API (physics)
 
-`GET http://physics:8080/rooms?level=level0&kind=co2` →
+`GET http://physics:8080/rooms?room=level0/A109` (or `?level=level0`, or
+nothing for every room) →
 
 ```json
 {
   "run_id": "pred-s42-2026-09-14",
-  "model_time": "2026-09-14T10:15:00",
+  "model_time": "2026-09-14T10:15:00Z",
   "rooms": {
     "level0/A109": {"co2_ppm": 612.4, "temp_c": 21.3, "occupancy": 6}
   }
 }
 ```
 
-- **Units:** ppm, °C, persons.
-- **Rate:** each gateway polls once per sample period (60 model-s, which is
-  1 s real at factor 60).
-- **Stale:** a gateway that gets the same `model_time` twice does not publish a
+- **Units:** ppm, °C, persons (guards included: a people counter can't tell).
+- `model_time` is always a whole model minute: the rooms' state at the latest
+  minute physics has computed.
+- **Rate:** each sensor polls every 250 ms real and takes a reading when
+  `model_time` has advanced by its sample period (60 model-s).
+- **Stale:** a sensor that gets the same `model_time` again does not publish a
   new reading.
-- **On failure:** timeout 500 ms, no retry within the sample. The gateway
-  publishes nothing, so the sensor goes stale downstream, which is what a dead
-  device looks like.
-- **Access:** only the gateways call it. The controller has no route to
-  physics in `compose.yaml` (the scope constraint in §0).
+- **On failure:** timeout 500 ms, no retry within the sample. The sensor
+  publishes nothing, so it goes stale downstream, which is what a dead device
+  looks like.
+- **Access:** only the sensors call it. This is a convention, not yet enforced:
+  the controller has no code that calls physics, but it shares the compose
+  network with it. Putting the truth layer on its own network would enforce
+  it (known limitation; the MQTT truth topic *is* enforced, IF-5).
 - Also `GET /healthz` for compose health checks.
 
 ## IF-3. Sensor readings in BuildSim
@@ -145,13 +178,21 @@ its IF-3 write.
 {
   "run_id": "pred-s42-2026-09-14",
   "room": "level0/A109",
-  "model_time": "2026-09-14T10:15:00",
-  "co2_ppm": 612.4, "temp_c": 21.3, "occupancy": 6,
-  "airflow_ls": 180.0, "setpoint_c": 21.0
+  "model_time": "2026-09-14T10:15:00Z",
+  "co2_ppm": 612.4, "temp_c": 21.3, "occupancy": 6, "guards": 0,
+  "airflow_ls": 180.0, "setpoint_c": 21.0,
+  "fan_w": 270.0, "ahu_heat_w": 2160.0, "radiator_w": 310.0
 }
 ```
 
-- **Rate:** every 60 model-s, per room.
+- `occupancy` is everyone in the room; `guards` how many of them are night
+  guards on patrol. The evaluation counts a room as occupied when
+  `occupancy − guards > 0`.
+- The three powers are averages over the minute that ended at `model_time`,
+  for the energy proxy (NFR-3).
+- **Rate:** one record per room at every whole model minute, at any speed
+  factor: physics computes each minute occupancysim recorded (IF-1), also
+  when it has to catch up.
 - **Access:** a Mosquitto ACL lets only `storage` subscribe to `truth/#`. The
   boundary is enforced by deployment, not by trust (Lecture 2, slide 8).
 - **On failure:** physics doesn't buffer. Gaps in the truth show up in the
@@ -179,7 +220,10 @@ Published once per control period (60 model-s) per room.
 ```
 
 One record per command: an airflow decision carries `airflow_target_ls`, a
-heating decision `setpoint_target_c`. For `predictive` and `oracle`,
+heating decision `setpoint_target_c`. A heating decision's `reason` names the
+rule that applied: `schedule: occupied hours`, `schedule: setback`, or
+`pre-heat for <day hh:mm>` when the setback has ended early so the room is
+warm by then (D-6). For `predictive` and `oracle`,
 `predicted_occupancy` is the number of people ventilated for (the most of the
 count now and the forecast within `lead_min`).
 

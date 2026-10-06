@@ -71,14 +71,31 @@ func ForCapacity(areaM2 float64, people int) Room {
 	}
 }
 
-// OccupiedHours reports whether t is inside the occupied schedule used for
-// the flow floor: weekdays 07:00–18:00.
+// The occupied schedule: weekdays from OccupiedFrom to OccupiedUntil. The
+// actuators use it for the flow floor, the controller for the heating setback.
+const (
+	OccupiedFrom  = 7  // hour of day
+	OccupiedUntil = 18 // hour of day
+)
+
+func weekend(t time.Time) bool {
+	wd := t.Weekday()
+	return wd == time.Saturday || wd == time.Sunday
+}
+
+// OccupiedHours reports whether t is inside the occupied schedule.
 func OccupiedHours(t time.Time) bool {
-	if wd := t.Weekday(); wd == time.Saturday || wd == time.Sunday {
-		return false
+	return !weekend(t) && t.Hour() >= OccupiedFrom && t.Hour() < OccupiedUntil
+}
+
+// NextOccupiedStart is the next time the occupied schedule begins, strictly
+// after t: 07:00 on the next weekday morning.
+func NextOccupiedStart(t time.Time) time.Time {
+	start := time.Date(t.Year(), t.Month(), t.Day(), OccupiedFrom, 0, 0, 0, t.Location())
+	for !start.After(t) || weekend(start) {
+		start = start.AddDate(0, 0, 1)
 	}
-	h := t.Hour()
-	return h >= 7 && h < 18
+	return start
 }
 
 // Floor is the lowest airflow the actuator allows at model time t.

@@ -39,6 +39,7 @@ func (s *Server) Handler() http.Handler {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 	mux.HandleFunc("GET /api/state", s.getState)
+	mux.HandleFunc("GET /api/minutes", s.getMinutes)
 	mux.HandleFunc("GET /api/events", s.events)
 	mux.HandleFunc("GET /api/config", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, s.Sim.Parameters())
@@ -58,6 +59,31 @@ func (s *Server) state() stateResponse {
 
 func (s *Server) getState(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.state())
+}
+
+type minutesResponse struct {
+	Clock   sim.ClockState        `json:"clock"`
+	Minutes []sim.MinuteOccupancy `json:"minutes"`
+}
+
+// getMinutes returns who was in each room at every whole simulated minute
+// after ?after= (RFC 3339), oldest first. Without ?after= it returns the
+// newest minute only. Unlike BuildSim's occupancy, each entry says which
+// minute it describes, and the sequence is the same in every run of a day.
+func (s *Server) getMinutes(w http.ResponseWriter, r *http.Request) {
+	var after time.Time
+	if raw := r.URL.Query().Get("after"); raw != "" {
+		var err error
+		if after, err = time.Parse(time.RFC3339, raw); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "after must be RFC 3339"})
+			return
+		}
+	}
+	clock, minutes := s.Sim.Minutes(after)
+	if minutes == nil {
+		minutes = []sim.MinuteOccupancy{}
+	}
+	writeJSON(w, http.StatusOK, minutesResponse{Clock: clock, Minutes: minutes})
 }
 
 // events streams the state once per second as server-sent events.

@@ -37,7 +37,7 @@ and critical reflection*.
 
 | # | Proposal said | Now | Reason | Affects |
 |---|---|---|---|---|
-| C-1 | The controller never sees occupancy. It estimates it from CO₂ (proposal §2) | **Each room has an occupancy sensor (people counter, BuildSim icon `occupancy_counter`).** Physics reads true occupancy from `/api/occupancy`; the `sensor-occupancy` gateway samples it from physics and writes a noisy count to that sensor, with the same sampling, noise and faults as the other sensors (D-2). The controller reads the sensor like any other device and never reads `/api/occupancy` directly | Lack of time: inverting the CO₂ mass balance is dropped from scope. Proposal §2 already named exposing occupancy directly as the fallback if the estimator proved infeasible, and said we would report it as such | D-2, D-5, D-6 step 1, D-8. The predictor, the policy and the baselines are unchanged |
+| C-1 | The controller never sees occupancy. It estimates it from CO₂ (proposal §2) | **Each room has an occupancy sensor (people counter, BuildSim icon `occupancy_counter`).** Physics takes the true occupancy from occupancysim's per-minute record; the occupancy sensor in each room samples it from physics and writes a noisy count to that sensor, with the same sampling, noise and faults as the other sensors (D-2). The controller reads the sensor like any other device and never reads `/api/occupancy` directly | Lack of time: inverting the CO₂ mass balance is dropped from scope. Proposal §2 already named exposing occupancy directly as the fallback if the estimator proved infeasible, and said we would report it as such | D-2, D-5, D-6 step 1, D-8. The predictor, the policy and the baselines are unchanged |
 
 Consequences of C-1:
 - **Sensors per room** go from 2 to 3 (temperature and CO₂, plus the occupancy counter), which
@@ -103,7 +103,7 @@ limits we are stuck with. Changes are logged in `external/README.md`.
 | A process that crashes **re-registers with BuildSim and carries on**; killing any process should degrade the system, not kill it | Lecture 1, slide 17 | Registration at start must be idempotent; every consumer needs a fallback |
 | **The truth never enters BuildSim** or anything the controller can read | Lecture 2, slide 8 | Physics serves truth only to gateways and storage; the viewer shows measured values (D-8) |
 | A data-driven component is required; threshold rules alone are not enough | Lecture 1, slide 22 | The occupancy predictor (FR-4) is that component |
-| **Our scope:** the controller never reads `/api/occupancy` directly. It sees occupancy only through the per-room occupancy sensor (changed from the proposal, see C-1) | proposal §2, C-1 | Only physics reads `/api/occupancy`; evaluation uses the truth recorded by storage |
+| **Our scope:** the controller never reads `/api/occupancy` directly. It sees occupancy only through the per-room occupancy sensor (changed from the proposal, see C-1) | proposal §2, C-1 | Nothing of ours reads `/api/occupancy`: BuildSim's copy is for the viewer. Physics takes occupancy from occupancysim's per-minute record (the two simulators are the truth layer), and the evaluation uses the truth recorded by storage |
 
 ### Facts about BuildSim and the example occupancysim that shape the design
 
@@ -113,7 +113,11 @@ limits we are stuck with. Changes are logged in `external/README.md`.
   `GET :8081/api/events`. BuildSim carries no time at all.
 - **Reproducible days.** Each day's plans are generated from the parameters
   plus a seed, so the same date and config give the same day. This is what
-  makes the **oracle baseline** possible (see D-7).
+  makes the **oracle baseline** possible (see D-7). The plans were
+  reproducible from the start, but what a reader *saw* of a day was not: the
+  simulator stepped on wall-clock ticks and refreshed BuildSim's occupancy at
+  most every 5 real seconds. We changed it to fixed steps and a per-minute
+  record (see `external/README.md` and D-1).
 - **Room roles by area.** Office ≤ 40 m², lecture ≥ 60 m², fika ≥ 100 m² (3 per
   floor). Floor-plan units are 0.5 m, and `rooms[].area` is in the floor-plan
   JSON, so the physics model gets each room's floor area from there. Assume a
@@ -151,13 +155,26 @@ Otherwise the room time constants from the proposal are meaningless.
 | C. Each service runs its own `wall × factor` clock | No dependency | Drifts as soon as someone pauses or jumps the clock in the UI |
 
 **Recommendation: A.** One exception: the actuators check command TTLs
-(D-6), so they also read the clock. Keep that to physics and the actuators.
+(D-6), so they need the time too; physics relays it to them over MQTT.
+
+**Refined 2026-10-06: physics advances by whole model minutes, not by its own
+tick.** Each tick it asks occupancysim for the minutes recorded since the
+last one (`GET /api/minutes`) and steps every room through each of them, with
+the occupancy of that minute. The truth is then the same function of model
+time in every run, and there is one truth record per model minute at any
+speed factor. Rejected alternative: sampling BuildSim's `/api/occupancy` on
+physics' own tick, which is what the first evaluation did. That occupancy has
+no time attached and can be 10 model-minutes old at factor 120, so two runs of
+one day disagreed in ~0.3 % of samples and the truth had a sample only every
+2 model-minutes. Trade-off: physics depends on an endpoint we added to
+occupancysim, and BuildSim's occupancy is now used by the viewer only.
 
 Numbers to keep in mind:
 - **Evaluation takes real time.** At factor 60, 5 simulated weekdays take
   2 real hours, and every baseline needs its own run: ~8 h for all four
   (NFR-8). Weekends are empty, so jump the clock over them. At factor 600 a run
-  takes ~12 min, but then each 1 s tick is 10 model minutes.
+  takes ~12 min; physics still computes every model minute, but the sensors,
+  which sample in real time, then see only every second or third one.
 - **The integration step must stay small.** Explicit Euler on a first-order
   model needs dt well below τ. With a CO₂ τ of ~12–60 min (see *Ventilation
   sizing*), cap dt at ~1 model minute and sub-step when the clock jumps further.
@@ -277,6 +294,18 @@ Also needed:
   control, or to design flow if CO₂ itself is missing (FR-7).
 - **Hysteresis and dwell times**, measured in model time.
 
+**Heating** is the same for every policy, so the baselines differ only in
+ventilation: 21 °C in the occupied hours (weekdays 07–18) and an 18 °C setback
+otherwise, with an **optimal start**. The setback ends early enough for the
+room to be warm at 07:00: the time needed is the degrees still missing
+divided by an assumed warm-up rate (1.5 K/h, a commissioning estimate on the
+slow side), plus 15 minutes for the valve and the sensor. Once a room has
+started pre-heating it keeps going until 07:00, even if it warms faster than
+assumed. Rejected alternative: switching at 07:00 sharp, which the first
+evaluation showed leaves rooms at 17.9 °C when people arrive and below 20 °C
+until about 08:13 (see evaluation-results.md). Trade-off: a little more
+radiator energy each morning, and the warm-up rate is assumed, not learned.
+
 ## D-7. Baselines and the oracle
 
 Implement the policy as an interface with four implementations chosen by a
@@ -294,6 +323,28 @@ days are reproducible from seed and date. So:
 **Verify as soon as storage runs that two runs with the same seed give identical
 occupancy.** If they don't, the oracle has to be designed differently. Because
 occupancysim is ours to change, exposing its day plans is the fallback.
+
+**Checked 2026-10-06 on the four evaluation runs: close, but not identical.**
+99.6–99.7 % of matching samples had the same head-count and the daily totals
+agreed within about 2 %. The day's *plan* was the same every time; what
+differed was how each run saw it. occupancysim stepped on wall-clock ticks and
+refreshed BuildSim's occupancy at most every 5 real seconds (10 model-minutes
+at factor 120), and physics sampled that on its own tick, so every run looked
+at the same day through a differently-phased, coarse window. A fika group
+leaving gradually showed as 36 → 10 in one run and 36 → 23 → 10 in another.
+For the first evaluation this means the oracle replayed a week slightly
+different from its own, and energy differences of a per cent or two between
+baselines are within the noise.
+
+**Fixed the same day** (D-1, `external/README.md`): occupancysim now advances
+in fixed steps and records the occupancy at every whole model minute, and
+physics steps through those minutes. Test T-25: the same Monday morning run at
+factor 600 and at factor 120 gave 39 200 truth records (50 rooms × 784
+minutes) with **no difference** in head-count, guard count, CO₂ or
+temperature. NFR-7 holds for the truth layer. What still varies between runs
+is the control loop's own timing (when a reading arrives, when a command
+lands), which is inherent to separate processes and is what the system is
+meant to tolerate.
 
 ## D-8. Dashboard
 
@@ -438,7 +489,7 @@ report §10.
 | NFR-4 | **Latency:** a command shows up in BuildSim within 1 control period (≤ 1 model-min, which is ~1 s real at factor 60) | Timestamps in the log, reported as p95 |
 | NFR-5 | **Scale:** for the chosen room set (50 rooms, 150 sensor writes per sample, which is 150 PUTs per real second at factor 60 and a 60 model-s sample period), a full sample cycle finishes within one sample period | Load test. This is also the REST → MQTT evidence for D-3 |
 | NFR-6 | **Robustness:** any one of our containers can be killed and restarted without an unsafe state. The actuator falls back to design flow when commands expire (TTL). The loop resumes within 30 s real | Chaos test: `docker kill` each service |
-| NFR-7 | **Reproducibility:** same seed and date give identical occupancy, and every number in the report traces to a run id | Two runs diffed (also the D-7 check) |
+| NFR-7 | **Reproducibility:** same seed and date give identical occupancy, and every number in the report traces to a run id | T-25: two runs diffed record by record. Failed in the first evaluation (99.6 % equal); holds since the 2026-10-06 fix (D-7) |
 | NFR-8 | **Evaluation cost:** 5 simulated weekdays per baseline run in ≤ 2.5 h real, so all 4 baselines fit in one day. The last day to start them is ~9 Oct | Timed run |
 
 Where the numbers come from:
@@ -490,13 +541,13 @@ is why the maximum sits above design.
 
 | # | Decision | Chosen | Rejected alternative | Requirement served | Trade-off accepted |
 |---|---|---|---|---|---|
-| D-1 | Time source | Physics reads occupancysim's clock; observations carry model time | Every service keeps its own `wall × factor` clock | FR-1, NFR-4 | Physics depends on occupancysim being up |
+| D-1 | Time source and stepping | Physics steps by whole model minutes from occupancysim's per-minute record; observations carry model time | Every service keeps its own `wall × factor` clock; physics sampling BuildSim's occupancy on its own tick | FR-1, NFR-4, NFR-7 | Physics depends on occupancysim being up, and on an endpoint we added to it |
 | D-2 | Sensor noise/faults | One container per sensor device, sampling its room from a truth API on physics | Physics writes noisy values to BuildSim itself; one gateway per kind | FR-2, FR-7, FR-11 | ~150 sensor containers; a truth API to specify |
 | D-3 | Transport | REST for the first slice; gateways also publish to MQTT once storage exists | A separate collector polling BuildSim | NFR-5, NFR-6 | A broker to run; two non-atomic writes per reading |
 | D-4 | Storage | A `storage` service owning JSONL per run, served over HTTP | JSONL files shared between processes | FR-8, NFR-7 | A small query API to write |
 | D-5 | Decomposition of autonomy | Validation, prediction and policy in one controller; training as a batch job | Predictor as its own service | FR-3, FR-4 | Parts of the controller can't be restarted separately |
 | D-6 | Safety filter placement | In the actuator, independent of the controller | Inside the controller, after the policy | FR-5, FR-6, NFR-6 | The actuator needs sizing data and the CO₂ stream |
-| D-7 | Baselines/oracle | Policy interface with four implementations; the oracle replays recorded truth | Oracle reading occupancysim's plans | FR-9, NFR-7 | Depends on same-seed runs being identical |
+| D-7 | Baselines/oracle | Policy interface with four implementations; the oracle replays recorded truth | Oracle reading occupancysim's plans | FR-9, NFR-7 | Depends on same-seed runs being identical, which needed the D-1 change |
 | D-8 | Dashboard | `viz` process publishing room layers and alerts to the BuildSim viewer | Own web dashboard | FR-10 | No history in the live view; plots come from storage offline |
 | D-9 | Actuator granularity | One container per actuator device | One container per kind for all rooms | FR-5, NFR-6 | ~100 actuator containers, generated |
 | D-10 | Device commissioning | Registry service with SQLite; devices learn their room at check-in | Device lists in configuration; registering straight in BuildSim | FR-11 | One more service on the start-up path; no device authentication |
