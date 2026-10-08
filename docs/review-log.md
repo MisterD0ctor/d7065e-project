@@ -4,6 +4,43 @@ Two things the oral exam asks about (Lecture 1, slide 55): where AI advice was
 wrong and how we caught it, and why the design looks the way it does. Add an
 entry whenever either happens. Newest first.
 
+## 2026-10-08: the dashboard (`viz`)
+
+`viz` is built (D-8, FR-10, IF-11): five heatmap layers and the current
+alerts in the BuildSim viewer, from the observations, decisions and actuator
+events on MQTT. The logic is in `internal/dashboard` so it can be unit-tested
+without a broker or BuildSim; `cmd/viz` is only the plumbing.
+
+| Finding | How it was caught | Fix |
+|---|---|---|
+| The planned airflow layer was 0–500 l/s. An office's maximum is ~20 l/s and a lecture room's ~900, so offices would always look off and lecture rooms always saturated | Looking at the sizing table before writing the layer | Airflow is shown as a share of each room's own maximum (from the registry) |
+| The viewer prints the unit straight after the number: "0people" | Headless screenshot of the legend | The people layers have no unit; their labels say "People" |
+| The first labels wrapped over three lines in the viewer's legend | Same screenshot | Shorter labels, with the meaning of the grey midpoint in the label itself |
+| A stopped CO₂ sensor shows up twice, correctly: its own "no reading" alert, and "damper on fallback" once the commands expire | Stopping `co2-0002` in the 50-room stack | None needed; both clear when the sensor returns |
+| A drifting CO₂ sensor (`drift:+6000`) is not detected as a fault. The reading passes 1100 ppm and the actuator's override opens the damper fully: wasteful, but the safe side | Injecting the fault and reading the alerts | Not fixed; see the gap below |
+
+Gap found while writing the alerts: **FR-7 promises more than is built.** It
+says the controller falls back when a sensor is "stale or stuck". Stale is
+built and tested (readings older than 180 model-s are dropped; the actuator's
+command TTL does the rest). A *stuck* sensor, one that keeps repeating its
+last value, is not detected anywhere: its readings arrive on time and look
+valid. T-12 as written ("detects it within 3 samples") cannot pass. Either a
+detector is added (a count that has not changed in N minutes while CO₂ moves,
+say) or FR-7 and T-12 are narrowed to what is built. Open; our decision.
+
+What could not be verified here: the room colours in the 3D scene. The
+headless browser drew the viewer's panels and the legend but not the WebGL
+scene, so the layers were checked through the API (five layers, 50 rooms
+each, values matching the readings) and the colour scales numerically (a unit
+test on their lightness). One of us has to look at the viewer and take the
+screenshot for the report.
+
+AI advice that was wrong here: the first draft of IF-11, written before any
+code, had the 0–500 l/s airflow scale above and layers published "every 60
+model-s". The second would have made the viewer lag a minute behind at
+factor 1; `viz` publishes once per real second instead, which is also what
+makes a restarted BuildSim get its layers back at once.
+
 ## 2026-10-06: second evaluation
 
 Five runs with the three fixes below, all complete, no gaps (sleep was

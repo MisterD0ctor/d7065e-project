@@ -21,11 +21,11 @@ under load), **eval** (full evaluation runs).
 | T-09 | CO₂ override: inject 1200 ppm while the policy asks for the floor | fault | FR-6 | Damper goes to maximum; `override_co2` event; releases below 1100 ppm |
 | T-10 | Override with the controller killed | fault | FR-6, NFR-6 | Same as T-09: the override doesn't depend on the controller |
 | T-11 | Flow floors: policy asks for zero flow, occupied and unoccupied | unit | FR-6 | Clamped to 0.35 and 0.10 l/s·m²; `clamped: true` |
-| T-12 | Stuck occupancy sensor during a lecture | fault | FR-7 | Controller detects it within 3 samples, switches to `degraded_occupancy`, alert shown |
+| T-12 | Stuck occupancy sensor during a lecture | fault | FR-7 | Controller detects it within 3 samples, switches to `degraded_occupancy`, alert shown. **Cannot pass as built:** only a silent counter is detected, not one repeating its last value (review log, 2026-10-08) |
 | T-13 | CO₂ sensor dropout (kill `sensor-co2`) | fault | FR-7, NFR-6 | `degraded_co2` → design flow within 3 samples; recovers when the gateway restarts |
 | T-14 | Rebuild a report plot from `GET /runs/{id}/export` alone | integration | FR-8 | The plot matches the one in the report |
 | T-15 | Policy flag: diff the configs of two baseline runs | integration | FR-9 | Only `POLICY` differs |
-| T-16 | Viewer: layers and alerts during T-09 and T-12 | integration | FR-10 | All four layers present; override and degraded alerts visible (screenshot) |
+| T-16 | Dashboard. Unit (`dashboard_test.go`): latest readings per layer, a silent sensor, override and fallback alerts, the 100-alert cap, a clock moved back, and the colour rules. Live, all 50 rooms: stop a CO₂ sensor; inject a drifting CO₂ sensor | unit + integration | FR-10, FR-7 | Five layers with all 50 rooms. Sensor stopped: the room leaves the CO₂ layer, with alerts for the silent sensor and the damper on fallback; both clear when it returns. Drift: a critical override alert once the reading passes 1100 ppm, airflow at 100 %; cleared when the fault is removed. Screenshot of the viewer for the report |
 | T-17 | BuildSim restart: it comes back blank | fault | FR-11 | The registry recreates every device's equipment within 10 s; readings resume |
 | T-18 | Air quality over the evaluation period, per baseline | eval | NFR-1 | `predictive`: CO₂ ≤ 1000 ppm for ≥ 95 % of occupied room-minutes |
 | T-19 | Comfort over the evaluation period, per baseline | eval | NFR-2 | ≥ 95 % of occupied room-minutes in 20–24 °C |

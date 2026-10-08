@@ -354,20 +354,60 @@ replays an earlier, finished run; the evaluation reads the export.
 
 ## IF-11. Room layers and alerts (viz)
 
-`viz` is the only writer (§0: every collection `PUT` replaces everything).
+`viz` is the only writer (§0: every collection `PUT` replaces everything). It
+builds both from what the control system itself sees: the observations
+(IF-4), the decisions (IF-6) and the actuator events (IF-7) on MQTT. The truth
+is not on any topic it may read.
 
-`PUT /api/room-layers`, all layers in one request, every 60 model-s:
+Open the viewer on a layer with
+`http://127.0.0.1:9090/?layer=co2&floor=level0`, or pick one under **Layers**.
 
-| Layer id | Label | `source` | Range |
+**`PUT /api/room-layers`**, all layers in one request, once per real second:
+
+| Layer id | Label in the viewer | `source` | Range | Colours |
+|---|---|---|---|---|
+| `co2` | CO₂ (grey = 1000 ppm limit) | `sensor reading` | 400–1600 ppm | blue – grey – red |
+| `occupancy` | People counted | `sensor reading` | 0–50 | light to dark blue |
+| `occupancy_predicted` | People expected soon | `prediction` | 0–50 | light to dark blue |
+| `airflow` | Airflow (% of room max) | `actuator state` | 0–100 % | light to dark blue |
+| `temperature` | Temperature (grey = 22 °C) | `sensor reading` | 17–27 °C | blue – grey – red |
+
+- **Colours follow the job of the layer.** "How much" (people, airflow) is one
+  hue from light to dark, so more is always darker. "Which side of a target"
+  (CO₂ against the 1000 ppm limit, temperature against the middle of the
+  comfort band) is blue and red around a neutral grey, and the range is
+  symmetric so that the grey sits exactly on the target. No rainbow scales.
+  A unit test checks both properties on the lightness of the colours.
+- **People expected soon** is the number the controller is ventilating for:
+  the most of the count now and the forecast within the room's lead time
+  (`predicted_occupancy` in IF-6). Under a policy that doesn't forecast the
+  layer has no values and is left out.
+- **Airflow** is what the damper reports in BuildSim (IF-9) as a share of the
+  room's maximum from the registry (IF-12): an office's 20 l/s and a lecture
+  room's 900 l/s would not fit one scale.
+- **A room drops out of a layer** when its reading is more than 180 model-s
+  old: a stale colour would claim something nobody measured.
+- The people layers carry no unit, because the viewer prints it straight
+  after the number; their labels say "People".
+
+**`PUT /api/alerts`**, at most 100, most severe first; sent when the list
+changes and again every 30 real seconds:
+
+| Severity | Alert | Raised by | Cleared by |
 |---|---|---|---|
-| `co2` | CO₂ (latest reading) | `sensor reading` | 400–1400 ppm |
-| `occupancy` | Occupancy (counted) | `sensor reading` | 0–40 |
-| `occupancy_predicted` | Occupancy in 15 min | `prediction` | 0–40 |
-| `airflow` | Airflow | `actuator state` | 0–500 l/s |
+| `critical` | CO₂ override in *room* | actuator event `override_co2` | `override_released` |
+| `warning` | No CO₂ / temperature / occupancy reading from *room* | the sensor's last reading being more than 180 model-s old | its next reading |
+| `warning` | Damper / radiator valve in *room* on fallback | actuator event `ttl_expired` | the next command it accepts |
+| `warning` | Command rejected in *room* | actuator event `rejected` | 5 model-minutes later |
+| `warning` | No occupancy count in *room* | a decision with `mode: degraded_occupancy` (unless the counter already has a silent-sensor alert) | the next normal decision |
+| `info` | No trained model | decisions with `mode: no_forecast`, one notice for the whole building | the next normal decisions |
 
-`PUT /api/alerts`, at most 100: one per room in a degraded mode (`warning`),
-one per active CO₂ override (`critical`). Alerts are the current picture only;
-storage is the audit trail.
+- Past 100, the last entry says how many more there are.
+- Alerts are the current picture only; storage is the audit trail.
+- **On failure:** if BuildSim is down, `viz` logs it once and retries every
+  second; the layers repair themselves within a second of BuildSim returning
+  blank, the alerts within 30. If the model clock is moved back by more than
+  half an hour (a new experiment), `viz` forgets the old picture.
 
 ## IF-12. Device registry
 

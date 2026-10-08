@@ -19,7 +19,9 @@ go run ./cmd/install -by <your name> -csv deploy/devices.csv
 go run ./cmd/install -by <your name> co2-0001 co2 level0/1570   # one device
 ```
 
-- BuildSim viewer: <http://127.0.0.1:9090>
+- BuildSim viewer: <http://127.0.0.1:9090>; our dashboard is its layers and
+  alerts, e.g. <http://127.0.0.1:9090/?layer=co2&floor=level0> (also
+  `occupancy`, `occupancy_predicted`, `airflow`, `temperature`)
 - occupancysim (people and the model clock): <http://127.0.0.1:8081>
 - registry (installer's form and API): <http://127.0.0.1:8070>
 - storage (history, models, exports): <http://127.0.0.1:8090>, e.g.
@@ -101,6 +103,7 @@ curl -X POST localhost:8081/api/clock -H 'Content-Type: application/json' -d '{"
 | `damper-0001`, `heat-0001`, … | `cmd/actuator` | One actuator device each: validates commands, enforces the safety limits, travels, reports |
 | `controller` | `cmd/controller` | Finds rooms and actuators in the registry; reads observations from MQTT (BuildSim as fallback); decides airflow by policy and heating by schedule with pre-heat; commands the actuators |
 | `storage` | `cmd/storage` | Records every MQTT message as JSONL per run; serves history and models |
+| `viz` | `cmd/viz` | The dashboard: heatmap layers and alerts in the BuildSim viewer, from the observations, decisions and actuator events |
 | `mosquitto` | `deploy/mosquitto` | MQTT broker; its ACL keeps `truth/#` for storage only |
 
 ## Test

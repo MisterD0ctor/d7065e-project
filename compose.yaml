@@ -127,6 +127,19 @@ services:
     depends_on: [registry]
     restart: unless-stopped
 
+  # The dashboard (D-8): the only writer of room layers and alerts in the
+  # BuildSim viewer. Open http://127.0.0.1:9090/?layer=co2&floor=level0
+  viz:
+    build: { context: ., args: { CMD: viz } }
+    environment:
+      BUILDSIM_URL: http://buildsim:9090
+      REGISTRY_URL: http://registry:8080
+      MQTT_URL: tcp://mosquitto:1883
+      MQTT_USER: viz
+      MQTT_PASS: viz-pw
+    depends_on: [mosquitto, registry]
+    restart: unless-stopped
+
   # Offline training (D-5): not part of `up`. Run it after recording runs:
   #   TRAIN_RUNS=train-1 docker compose run --rm train
   train:

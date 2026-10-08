@@ -353,11 +353,11 @@ dashboard". Lecture 1 lists the dashboard as its own process (slide 17).
 
 | Option | Pro | Con |
 |---|---|---|
-| **A. A `viz` container, the only room-layer publisher. It subscribes to `obs/#` and `decision/#` and `PUT`s combined room layers (measured CO₂, measured occupancy, predicted occupancy, airflow) plus `/api/alerts` for overrides and degraded mode** | The 3D view from the proposal for free; `viz` is our own process, so it counts as the dashboard | No history in the viewer |
+| **A. A `viz` container, the only writer of room layers and alerts. It subscribes to `obs/#`, `decision/#` and `event/#` and `PUT`s the room layers (measured CO₂, people counted, people expected, airflow, temperature) plus `/api/alerts` for overrides, silent sensors and actuators on fallback (IF-11)** | The 3D view from the proposal for free; `viz` is our own process, so it counts as the dashboard | No history in the viewer |
 | B. Own web dashboard (time-series charts, e.g. Grafana over storage) | Shows history, which the viewer can't | A container to build or configure |
 
-**Recommendation: A, plus plots generated offline for the report.** Add B only
-if time allows before 12 Oct. Show **measured** CO₂, not true CO₂: the truth
+**Chosen: A (built 2026-10-08), plus plots generated offline for the report.**
+B stays out unless time allows before 12 Oct. Show **measured** CO₂, not true CO₂: the truth
 never enters BuildSim (Lecture 2, slide 8). The truth appears only in the
 evaluation.
 
@@ -476,7 +476,7 @@ report §10.
 | FR-7 | Degraded mode: if a sensor is stale (> 3 missed samples) or stuck, the controller falls back. A bad occupancy sensor means reacting to CO₂; a bad CO₂ sensor means design flow. It publishes the mode change, which `viz` shows as an alert | Fault-injection test (stuck, dropout) |
 | FR-8 | Every observation, ground-truth value, command and decision is stored with model time and a run id | Check: a run's JSONL files can rebuild its report plots |
 | FR-9 | The policy is chosen by a flag: `constant`, `reactive`, `predictive`, `oracle`. Everything else is identical between runs | Config diff between runs shows only the policy changed |
-| FR-10 | The BuildSim viewer shows measured CO₂, measured and predicted occupancy, and airflow per room, plus alerts for overrides and degraded mode | Demo and screenshot |
+| FR-10 | The BuildSim viewer shows measured CO₂, measured and predicted occupancy, airflow and temperature per room, plus alerts for overrides, silent sensors and actuators on fallback | T-16 |
 | FR-11 | Devices are commissioned in the registry: a device does nothing until an installer has registered its id, kind and room, and the registry keeps BuildSim's equipment list in step with what is installed, also after a BuildSim restart | T-17, T-28–T-30 |
 
 ### Non-functional
@@ -548,7 +548,7 @@ is why the maximum sits above design.
 | D-5 | Decomposition of autonomy | Validation, prediction and policy in one controller; training as a batch job | Predictor as its own service | FR-3, FR-4 | Parts of the controller can't be restarted separately |
 | D-6 | Safety filter placement | In the actuator, independent of the controller | Inside the controller, after the policy | FR-5, FR-6, NFR-6 | The actuator needs sizing data and the CO₂ stream |
 | D-7 | Baselines/oracle | Policy interface with four implementations; the oracle replays recorded truth | Oracle reading occupancysim's plans | FR-9, NFR-7 | Depends on same-seed runs being identical, which needed the D-1 change |
-| D-8 | Dashboard | `viz` process publishing room layers and alerts to the BuildSim viewer | Own web dashboard | FR-10 | No history in the live view; plots come from storage offline |
+| D-8 | Dashboard | `viz` process publishing room layers and alerts to the BuildSim viewer | Own web dashboard | FR-10, FR-7 | No history in the live view; plots come from storage offline |
 | D-9 | Actuator granularity | One container per actuator device | One container per kind for all rooms | FR-5, NFR-6 | ~100 actuator containers, generated |
 | D-10 | Device commissioning | Registry service with SQLite; devices learn their room at check-in | Device lists in configuration; registering straight in BuildSim | FR-11 | One more service on the start-up path; no device authentication |
 | — | **Room set (scale)** | 50 rooms on level0: the 3 fika rooms, 20 lecture rooms and 27 offices, as a fixed list in config (a seeded random sample, so it is reproducible) | Whole building (838 rooms, ~2 500 PUTs per sample) or all of level0 (277 rooms) | NFR-5 | Most of level0's lecture rooms are left out, so many lectures land in rooms we don't simulate. With 20 of ~48, about 40 % of the lectures fall inside the set |

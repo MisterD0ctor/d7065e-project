@@ -32,7 +32,7 @@ sys: "Ventilation Control  [System]" {
     shape: cylinder
   }
   train: "train\n[Batch job: Go]\nPer-room occupancy profile"
-  viz: "viz\n[Container: Go]\nThe only room-layer publisher"
+  viz: "viz\n[Container: Go]\nDashboard: the only writer of\nroom layers and alerts"
 }
 
 installer -> sys.registry: "Registers id, kind, room [REST / web form]"
@@ -55,5 +55,6 @@ sys.actuators -> bs: "Reached state [REST]"
 sys.broker -> sys.storage: "obs, truth, decisions [MQTT]"
 sys.storage -> sys.controller: "Latest model [REST]"
 sys.train <-> sys.storage: "History in, model out [REST]"
-sys.broker -> sys.viz: "obs, decisions [MQTT]"
-sys.viz -> bs: "Room layers, alerts [REST]"
+sys.broker -> sys.viz: "obs, decisions, events [MQTT]"
+sys.viz -> bs: "Room layers, alerts; reads the dampers' state [REST]"
+sys.viz -> sys.registry: "Each room's maximum flow [REST]"

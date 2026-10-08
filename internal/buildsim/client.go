@@ -105,6 +105,48 @@ func (c *Client) BulkCreate(ctx context.Context, eq []Equipment) error {
 	return c.do(ctx, http.MethodPost, "/api/equipment/bulk", eq, nil)
 }
 
+// RoomLayer is one heatmap in the viewer: a value per room, mapped onto
+// Minimum..Maximum and coloured by interpolating along Palette.
+type RoomLayer struct {
+	ID      string             `json:"id"`
+	Label   string             `json:"label"`
+	Unit    string             `json:"unit,omitempty"`
+	Source  string             `json:"source,omitempty"`
+	Minimum float64            `json:"minimum"`
+	Maximum float64            `json:"maximum"`
+	Opacity float64            `json:"opacity"`
+	Palette []string           `json:"palette"`
+	Values  map[string]float64 `json:"values"` // "<level>/<room>" → value
+}
+
+// Alert is a short, current message in the viewer. Severity is info, warning
+// or critical.
+type Alert struct {
+	ID       string `json:"id"`
+	Severity string `json:"severity"`
+	Title    string `json:"title"`
+	Message  string `json:"message,omitempty"`
+	Level    string `json:"level,omitempty"`
+	Room     string `json:"room,omitempty"`
+}
+
+// PutRoomLayers replaces every room layer in the viewer. BuildSim keeps one
+// collection, so only one service may call this.
+func (c *Client) PutRoomLayers(ctx context.Context, layers []RoomLayer) error {
+	if layers == nil {
+		layers = []RoomLayer{}
+	}
+	return c.do(ctx, http.MethodPut, "/api/room-layers", layers, nil)
+}
+
+// PutAlerts replaces every alert in the viewer (at most 100).
+func (c *Client) PutAlerts(ctx context.Context, alerts []Alert) error {
+	if alerts == nil {
+		alerts = []Alert{}
+	}
+	return c.do(ctx, http.MethodPut, "/api/alerts", alerts, nil)
+}
+
 // DeleteEquipment removes a unit and its sensors and actuators.
 func (c *Client) DeleteEquipment(ctx context.Context, id string) error {
 	return c.do(ctx, http.MethodDelete, "/api/equipment/"+url.PathEscape(id), nil, nil)
