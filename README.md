@@ -82,11 +82,23 @@ prints the tables (docs/evaluation-results.md). Pick a new `SUFFIX` each time,
 keep the PC awake (`systemd-inhibit --what=sleep:idle deploy/evaluate-all.sh`),
 and don't restart containers while it runs.
 
+`go run ./cmd/evaluate -runs <runs> -stuck-check` also replays the runs'
+readings through the stuck-sensor detector (FR-7): in a run without injected
+faults every verdict would be a false alarm.
+
+Inject faults with `deploy/fault.sh`, not with a bare
+`FAULT_CO2_0001=stuck docker compose up -d co2-0001`. Compose takes `RUN_ID`
+from `.env` unless it is given, so in a stack started under another run id
+the bare command files the sensor's readings under the wrong run and
+restarts physics as well. The script reads the run id from the running
+controller.
+
 ### While developing
 
 ```
 POLICY=constant docker compose up -d controller            # constant | reactive
-FAULT_CO2_0001=stuck docker compose up -d co2-0001         # stuck | dropout | drift:+50
+deploy/fault.sh co2-0001 stuck                             # stuck | dropout | drift:+50
+deploy/fault.sh co2-0001                                   # healthy again
 curl 'localhost:8090/history?kind=decision' | tail         # decision records
 curl 'localhost:8090/history?kind=truth' | tail            # true room state, per model minute
 curl -o run.tar localhost:8090/runs/dev/export             # a run's JSONL, for offline analysis

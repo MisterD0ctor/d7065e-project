@@ -3,7 +3,8 @@
 // a damper, where to reach each actuator, and each room's sizing (IF-12). It
 // takes the observations from MQTT (IF-4) and falls back to polling BuildSim
 // when the broker is silent (D-3). Each decision is published for storage and
-// viz (IF-6). This version has the constant and reactive policies (FR-9).
+// viz (IF-6). A sensor that keeps repeating itself is treated like one that
+// is missing (FR-7, internal/stuck).
 package main
 
 import (
@@ -31,6 +32,7 @@ import (
 	"github.com/MisterD0ctor/d7065e-project/internal/registry"
 	"github.com/MisterD0ctor/d7065e-project/internal/rooms"
 	"github.com/MisterD0ctor/d7065e-project/internal/sizing"
+	"github.com/MisterD0ctor/d7065e-project/internal/stuck"
 )
 
 const (
@@ -78,6 +80,8 @@ type controller struct {
 	fallback    bool
 	people      map[rooms.Key]count // latest occupancy count per room
 
+	sensors *stuck.Detector // which sensors keep repeating themselves (FR-7)
+
 	forecast forecast         // predictive and oracle only
 	profile  *profileForecast // predictive only, for reloading
 
@@ -104,6 +108,8 @@ func main() {
 		plants: map[rooms.Key]plant{},
 		polled: map[string]time.Time{},
 		people: map[rooms.Key]count{},
+
+		sensors: stuck.New(),
 	}
 	slow := &http.Client{Timeout: 2 * time.Minute}
 	switch policy {
@@ -221,7 +227,7 @@ func (c *controller) onObservation(ctx context.Context, payload []byte) {
 		log.Printf("%s: dropping stale %s reading from %s", k, o.Kind, o.ModelTime)
 		return
 	}
-	c.act(ctx, k, o.Kind, o.Value, t, o.ModelTime)
+	c.act(ctx, k, o.SensorID, o.Kind, o.Value, t, o.ModelTime)
 }
 
 // pollIfSilent is the fallback path: with the broker down or silent, read the
@@ -260,7 +266,7 @@ func (c *controller) pollIfSilent(ctx context.Context) {
 				c.polled[id] = s.Timestamp
 				c.mu.Unlock()
 				if isNew {
-					c.act(ctx, k, kind, v, last, "")
+					c.act(ctx, k, id, kind, v, last, "")
 				}
 			}
 		}
@@ -285,13 +291,14 @@ func (c *controller) reloadModel(ctx context.Context) {
 // act decides and commands one room for one reading. A room whose sensor goes
 // quiet gets no commands, so its actuator's TTL expires and it falls back to
 // design flow or 21 °C: the degraded mode for a missing sensor (FR-7) needs
-// nothing from the controller.
-func (c *controller) act(ctx context.Context, k rooms.Key, kind string, value float64, t time.Time, modelTime string) {
+// nothing from the controller. A sensor that is stuck keeps reporting, so
+// here the controller has to notice, and it commands that same fallback.
+func (c *controller) act(ctx context.Context, k rooms.Key, sensor, kind string, value float64, t time.Time, modelTime string) {
 	p, ok := c.plant(k)
 	if !ok {
 		return // a room with sensors but nothing registered to control
 	}
-	var endpoint, unit, reason string
+	var endpoint, unit, reason, fault string
 	var target float64
 	mode := "normal"
 	var predicted *float64
@@ -302,11 +309,23 @@ func (c *controller) act(ctx context.Context, k rooms.Key, kind string, value fl
 		c.mu.Lock()
 		c.people[k] = count{n: value, at: t}
 		c.mu.Unlock()
+		if modelTime != "" {
+			c.sensors.Count(k, t, value)
+		}
 		return
 	case rooms.CO2:
 		endpoint, unit = p.damper, "l/s"
-		people, m := c.peopleFor(k, p.size, t)
-		mode = m
+		if n, flat := c.sensors.Flat(sensor, kind, value); flat {
+			mode, target = "degraded_co2", p.size.Design
+			fault = fmt.Sprintf("CO₂ sensor has read %.0f ppm %d times in a row", value, n)
+			reason = "CO₂ sensor stuck: design flow"
+			break
+		}
+		if modelTime != "" {
+			c.sensors.CO2(k, t, value) // the counter is checked against it
+		}
+		people, m, f := c.peopleFor(k, p.size, t)
+		mode, fault = m, f
 		if c.forecast != nil {
 			lead := leadTime(p.size)
 			leadMin = lead.Minutes()
@@ -319,6 +338,12 @@ func (c *controller) act(ctx context.Context, k rooms.Key, kind string, value fl
 		}
 	case rooms.Temp:
 		endpoint, unit = p.heating, "°C"
+		if n, flat := c.sensors.Flat(sensor, kind, value); flat {
+			mode, target = "degraded_temp", sizing.DefaultSetpoint
+			fault = fmt.Sprintf("Temperature sensor has read %.1f °C %d times in a row", value, n)
+			reason = "temperature sensor stuck: default setpoint"
+			break
+		}
 		target, reason = c.heat.Setpoint(k, t, value)
 	default:
 		return
@@ -333,7 +358,7 @@ func (c *controller) act(ctx context.Context, k rooms.Key, kind string, value fl
 	status, res := c.command(ctx, endpoint, k, cmd)
 	d := msg.Decision{
 		RunID: c.runID, Room: k.String(), ModelTime: modelTime, Policy: c.policy,
-		Mode: mode, Observed: map[string]float64{kind: value},
+		Mode: mode, Fault: fault, Observed: map[string]float64{kind: value},
 		PredictedOccupancy: predicted, LeadMin: leadMin,
 		CmdID: cmd.CmdID, Status: status, AppliedTarget: res.Target,
 		Clamped: res.Clamped, Reason: reason,
@@ -348,28 +373,33 @@ func (c *controller) act(ctx context.Context, k rooms.Key, kind string, value fl
 
 // peopleFor is how many people to ventilate room k for at model time t: the
 // most of the count now and the forecast within the lead time. The mode says
-// what the answer rests on (IF-6).
-func (c *controller) peopleFor(k rooms.Key, size sizing.Room, t time.Time) (float64, string) {
+// what the answer rests on, and fault what is wrong with the counter if it
+// was left out for being stuck (IF-6).
+func (c *controller) peopleFor(k rooms.Key, size sizing.Room, t time.Time) (people float64, mode, fault string) {
 	if c.forecast == nil {
-		return 0, "normal"
+		return 0, "normal", ""
 	}
-	mode := "normal"
+	mode = "normal"
 	var now float64
 	if c.policy == Predictive {
 		c.mu.Lock()
 		r, ok := c.people[k]
 		c.mu.Unlock()
-		if ok && t.Sub(r.at) <= StaleAfter {
-			now = r.n
-		} else {
+		why, stuck := c.sensors.Counter(k, size, t)
+		switch {
+		case !ok || t.Sub(r.at) > StaleAfter:
 			mode = "degraded_occupancy" // counter stale or missing: forecast and CO₂ only
+		case stuck:
+			mode, fault = "degraded_occupancy", why // the same, for a counter CO₂ contradicts
+		default:
+			now = r.n
 		}
 	}
 	expected, ok := c.forecast.Expected(k.String(), t, leadTime(size))
 	if !ok && mode == "normal" {
 		mode = "no_forecast"
 	}
-	return max(now, expected), mode
+	return max(now, expected), mode, fault
 }
 
 // command sends one command, retrying the same cmd_id so a lost reply can't

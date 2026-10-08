@@ -4,6 +4,39 @@ Two things the oral exam asks about (Lecture 1, slide 55): where AI advice was
 wrong and how we caught it, and why the design looks the way it does. Add an
 entry whenever either happens. Newest first.
 
+## 2026-10-08: the stuck-sensor detector
+
+FR-7 promised a fallback for a *stuck* sensor and nothing detected one (the
+entry below). Now built: `internal/stuck`, design in D-11. CO₂ and
+temperature sensors are found by a run of identical readings; the counter by
+two bounds from the room's CO₂ mass balance that hold for any airflow. A
+stuck sensor is then treated exactly like a missing one.
+
+| Finding | How it was caught | Fix |
+|---|---|---|
+| "Within 3 samples" (T-12) is not possible. Readings are rounded, so a healthy CO₂ sensor repeats a value three times running about 15 times a day in the building, and a healthy temperature sensor far more often | Summing the chance of a repeat over the values a sensor can show, before choosing the limit | The limit is the shortest run with under one false alarm per 100 building-days: 5 readings for CO₂, 12 for temperature. A unit test recomputes both and checks the sum against a simulated week |
+| The margin for "CO₂ contradicts the counter" was first a fixed 100 ppm. The CO₂ sensor's noise grows with the level (±(30 ppm + 3 %)), so at a few thousand ppm 100 ppm is only two standard errors | Working through the test case with the damper held at the floor, where CO₂ reaches 4000 ppm | The margin is five standard errors of the mean at the level measured |
+| Live, the first frozen counter was never found. The container took five model-minutes to restart at factor 60, the lecture had just ended, and the counter froze at 4 in a 25-person room: four people's CO₂ at full flow (63 ppm) is inside the sensor noise | Watching the live test for three model-hours | None: this is the detector's blind spot, now documented and pinned by a unit test (`TestSmallOvercountInABigRoomGoesUnseen`). The live test was repeated with the clock paused during the injection (T-12) |
+| The second attempt: counter frozen at 32 with 33 in the room. Not blamed for the remaining 55 minutes of the lecture; found 15 minutes after the room emptied; the flow went from 247 l/s (for "32 people") to 6 l/s | Decision records and the dashboard | — |
+| The live test's records went to the wrong run. `.env` still named an old run (`smoke-predictive`), the stack had been started with `RUN_ID=viz-dev` on the command line, and every `docker compose up -d <service>` without it recreated that service under the `.env` run id, physics included | The decisions with the fault text were missing from `viz-dev` in storage | `deploy/fault.sh` injects a fault with the run id read from the running controller and touches only the sensor. The stray records (model date 2026-09-21) are still in `smoke-predictive`, a development run no result uses; the evaluation runs were not touched |
+| Does the detector change the evaluation? | `cmd/evaluate -stuck-check`: the four final runs replayed through it | No verdict in 1.44 million CO₂ readings, 1.44 million temperature readings and 1.44 million counter checks, so not one decision would have differed (T-38) |
+
+AI advice that was wrong here:
+- The detector first proposed, in the entry below, was "a count that has not
+  changed in N minutes while CO₂ moves". That blames every healthy counter:
+  CO₂ lags the count by the room's time constant, so after 40 people sit down
+  the count is still while CO₂ climbs for half an hour. Caught on paper,
+  before any code, by asking what a healthy room looks like right after a
+  lecture starts. What replaced it compares CO₂ with what the *counted*
+  people could cause, not with whether the count moved.
+- The fixed 100 ppm margin, above.
+- `FAULT_CO2_0001=stuck docker compose up -d co2-0001` has been the
+  documented way to inject a fault since the per-device containers. It is
+  only right when `.env` names the live run. Nobody noticed because the
+  dashboard and the controller don't care about the run id; storage does.
+
+What the detector cannot do is in D-11 (*Limits, measured*).
+
 ## 2026-10-08: the dashboard (`viz`)
 
 `viz` is built (D-8, FR-10, IF-11): five heatmap layers and the current
@@ -26,7 +59,8 @@ command TTL does the rest). A *stuck* sensor, one that keeps repeating its
 last value, is not detected anywhere: its readings arrive on time and look
 valid. T-12 as written ("detects it within 3 samples") cannot pass. Either a
 detector is added (a count that has not changed in N minutes while CO₂ moves,
-say) or FR-7 and T-12 are narrowed to what is built. Open; our decision.
+say) or FR-7 and T-12 are narrowed to what is built. Closed the same day with
+a detector; see the entry above.
 
 What could not be verified here: the room colours in the 3D scene. The
 headless browser drew the viewer's panels and the legend but not the WebGL

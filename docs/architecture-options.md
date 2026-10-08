@@ -49,7 +49,9 @@ Consequences of C-1:
 - **What we lose:** there is no claim of occupancy sensing without a dedicated
   sensor. Mention CO₂-based estimation as future work.
 - **Degraded state** gets a new case: if the counter is stale, stuck or
-  missing, fall back to CO₂-reactive control.
+  missing, fall back to CO₂-reactive control. Finding a stuck counter uses
+  the same CO₂ mass balance the proposal wanted to invert, but only as two
+  bounds (D-11).
 
 ### Planned: study groups in occupancysim (not implemented yet)
 
@@ -202,7 +204,8 @@ name the quickstart shape as the rejected alternative.
 
 **Chosen: C** (decided 2026-09-30, after first building B). The registry, not
 the sensor, registers the equipment in BuildSim (D-10). Fault injection is
-config on one device: `FAULT_CO2_0001=stuck docker compose up -d co2-0001`.
+config on one device (`FAULT_CO2_0001=stuck`), set with
+`deploy/fault.sh co2-0001 stuck`.
 
 **Scale check:** 3 sensors × 50 rooms = 150 PUTs per sample, one per sensor
 container. The whole building (838 rooms) would be ~2 500 PUTs per sample, and
@@ -291,7 +294,8 @@ the propose-vs-apply split the quickstart asks for.
 
 Also needed:
 - **Degraded state.** If a sensor is stale or stuck, fall back to reactive
-  control, or to design flow if CO₂ itself is missing (FR-7).
+  control, or to design flow if CO₂ itself is missing (FR-7). A stale sensor
+  is found by its silence. A stuck one keeps talking; D-11 is how it is found.
 - **Hysteresis and dwell times**, measured in model time.
 
 **Heating** is the same for every policy, so the baselines differ only in
@@ -402,6 +406,78 @@ authenticate to the registry. A real installation would hand each device a
 secret at commissioning, so a random device on the LAN can't pose as a sensor.
 State this in the report.
 
+## D-11. Telling a stuck sensor from a quiet room
+
+A stuck sensor repeats its last value (FR-7). Its readings arrive on time and
+look valid, so the staleness check and the command TTL never trigger. The
+costs differ by sensor. A CO₂ sensor stuck at 500 ppm blinds both the policy
+and the actuator's override while a lecture fills the room. A counter stuck
+at 40 keeps the damper open for 40 people all night. A stuck temperature
+sensor only mistimes the morning pre-heat.
+
+| Option | Pro | Con |
+|---|---|---|
+| A. Too many identical readings in a row, for every sensor | One rule, no model | Wrong for the counter: an empty room really reads 0 for hours. A limit long enough to be safe there is several hours |
+| B. Counter unchanged while CO₂ moves | Simple to say | Wrong: CO₂ lags the count by the room's time constant. After 40 people sit down the count is still and CO₂ climbs for half an hour. It would blame every healthy counter at the start of every lecture |
+| C. Estimate the head-count from CO₂ and the airflow, compare with the counter | Two-sided, quantitative | Needs the damper's true flow at every moment (travel, floors, override), so an error there becomes a false alarm; and it is the estimator C-1 dropped |
+| **D. A for CO₂ and temperature. For the counter: two bounds from the CO₂ mass balance that hold for any airflow** | No airflow knowledge needed; each bound is one line of physics; false-alarm rates can be computed | Blind to small errors (below); the counter is only found once the air has had time to disagree |
+
+**Chosen: D** (2026-10-08, `internal/stuck`).
+
+*CO₂ and temperature* are noisy (FR-2) and rounded (1 ppm, 0.1 °C), so a
+healthy sensor seldom repeats itself. The chance of k identical readings in a
+row is the sum over every value the sensor can show of (the chance of showing
+it)^k. The limit is the shortest run that a healthy 50-room building produces
+less than once in 100 days: **5 readings for CO₂** (chance 5.5·10⁻⁸ per
+reading) and **12 for temperature** (1.2·10⁻⁷; its noise is only 1.5 rounding
+steps wide, so it repeats more). One different reading and the sensor is
+trusted again.
+
+*The counter* is judged against the room's CO₂. With x the CO₂ above outdoor,
+n people, G the CO₂ one person gives off and q the airflow:
+
+```
+V·dx/dt = G·n − q·x        and        0 ≤ q ≤ q_max
+```
+
+Whatever q is, two things follow:
+
+- **x can't rise faster than G·n/V.** Only people add CO₂. If the counter has
+  not moved for 20 minutes and CO₂ has risen more than its n people can
+  explain in the last 15, more people are there than it counts.
+- **x can't stay below (G·n/q_max)·(1 − e^(−t·q_max/V))** after n people have
+  been there for t. That is the level they would give with the damper fully
+  open all the time, and any smaller flow gives more. If CO₂ is under it, fewer
+  people are there than the counter says.
+
+Both are checked on five-minute means of CO₂, must be exceeded by five
+standard errors of that mean, and allow a person to give off twice or half
+the nominal CO₂. A counter that has not moved and breaks either bound is
+stuck. The verdict lasts until its reading changes.
+
+**What happens then** is what already happens for a missing sensor, so there
+is one answer to "no trustworthy reading": CO₂ → design flow
+(`degraded_co2`); temperature → 21 °C (`degraded_temp`); counter → forecast
+and CO₂ only (`degraded_occupancy`). The decision says what was found
+(`fault`, IF-6) and `viz` shows it (IF-11).
+
+**Limits, measured** (T-12, T-36 to T-38):
+- A counter is found only after the room's air has had time to disagree:
+  15 to 20 minutes after a lecture room empties (15 live, 22 in the unit
+  test's larger room), about 75 for an office (small room, small flow, slow
+  air).
+- A counter stuck on a number whose CO₂ would be lost in the sensor noise
+  even at full flow is not found: roughly fewer people than a quarter of the
+  room's capacity. Seen live: a counter stuck at 4 in a 25-person room was
+  never blamed in three hours. It costs the flow for four people.
+- A counter stuck on a number that stays right is not found, and costs nothing.
+- A drifting sensor is not a stuck one and is not detected. A CO₂ sensor
+  drifting up ends in the override (safe, wasteful); one drifting down would
+  be believed, and would also make a healthy counter look like it over-counts.
+- The run lengths come from *our* sensor model. A real sensor quieter than
+  its resolution would repeat itself when healthy, and would need the limits
+  set from its own noise.
+
 ---
 
 ## What the recommended options add up to (draft container view)
@@ -449,9 +525,11 @@ run as one container per device):
 
 ```
 cmd/physics cmd/sensor cmd/actuator cmd/controller cmd/storage cmd/registry
+cmd/viz cmd/train cmd/evaluate
 cmd/install cmd/gendevices                     # installer's tool, compose generator
 internal/buildsim internal/clock internal/devreg internal/registry internal/store
 internal/msg internal/mqttx internal/faults internal/roommodel internal/sizing
+internal/predict internal/stuck internal/dashboard internal/actuator
 compose.yaml compose.devices.yaml (generated) deploy/ docs/ external/
 ```
 
@@ -473,7 +551,7 @@ report §10.
 | FR-4 | The controller predicts each room's occupancy one lead time ahead (lead time ≈ the room's CO₂ τ). The model is trained offline from stored history | Offline test: prediction error (MAE) on a held-out day beats a naive "same as now" prediction |
 | FR-5 | The actuator validates every command before applying it: value range, rate of change, TTL in model time, and duplicates (idempotent on `cmd_id`). It rejects invalid commands with a reason, and moves towards accepted targets at a fixed rate | Unit tests with out-of-range, stale and duplicate commands |
 | FR-6 | Safety override, enforced in the damper actuator independently of the controller (D-6): CO₂ > 1100 ppm gives maximum airflow (1.5 × q_design) no matter what the policy says. The flow never drops below 0.35 l/s·m² during occupied hours or 0.10 l/s·m² otherwise (see *Ventilation sizing*) | Test with an injected CO₂ spike and a policy that asks for zero flow |
-| FR-7 | Degraded mode: if a sensor is stale (> 3 missed samples) or stuck, the controller falls back. A bad occupancy sensor means reacting to CO₂; a bad CO₂ sensor means design flow. It publishes the mode change, which `viz` shows as an alert | Fault-injection test (stuck, dropout) |
+| FR-7 | Degraded mode: if a sensor is stale (> 3 missed samples) or stuck (repeating one value, D-11), the system falls back. A bad occupancy sensor means reacting to CO₂ and the forecast; a bad CO₂ sensor means design flow; a bad temperature sensor means 21 °C. A stuck CO₂ sensor is found within 5 samples and a stuck temperature sensor within 12; a stuck counter once the room's CO₂ contradicts it. The decision names the mode and the fault, which `viz` shows as an alert | T-12, T-13, T-36 to T-38 |
 | FR-8 | Every observation, ground-truth value, command and decision is stored with model time and a run id | Check: a run's JSONL files can rebuild its report plots |
 | FR-9 | The policy is chosen by a flag: `constant`, `reactive`, `predictive`, `oracle`. Everything else is identical between runs | Config diff between runs shows only the policy changed |
 | FR-10 | The BuildSim viewer shows measured CO₂, measured and predicted occupancy, airflow and temperature per room, plus alerts for overrides, silent sensors and actuators on fallback | T-16 |
@@ -551,6 +629,7 @@ is why the maximum sits above design.
 | D-8 | Dashboard | `viz` process publishing room layers and alerts to the BuildSim viewer | Own web dashboard | FR-10, FR-7 | No history in the live view; plots come from storage offline |
 | D-9 | Actuator granularity | One container per actuator device | One container per kind for all rooms | FR-5, NFR-6 | ~100 actuator containers, generated |
 | D-10 | Device commissioning | Registry service with SQLite; devices learn their room at check-in | Device lists in configuration; registering straight in BuildSim | FR-11 | One more service on the start-up path; no device authentication |
+| D-11 | Stuck-sensor detection | Run of identical readings for CO₂ and temperature; the counter against two CO₂ mass-balance bounds that hold for any airflow | "Counter unchanged while CO₂ moves"; estimating the head-count from CO₂ and the airflow | FR-7 | Blind to small over-counts; a counter is found only after the room's air disagrees (15–20 min in a lecture room, 75 in an office) |
 | — | **Room set (scale)** | 50 rooms on level0: the 3 fika rooms, 20 lecture rooms and 27 offices, as a fixed list in config (a seeded random sample, so it is reproducible) | Whole building (838 rooms, ~2 500 PUTs per sample) or all of level0 (277 rooms) | NFR-5 | Most of level0's lecture rooms are left out, so many lectures land in rooms we don't simulate. With 20 of ~48, about 40 % of the lectures fall inside the set |
 
 Each row cites a requirement ID from the section above. The report guide

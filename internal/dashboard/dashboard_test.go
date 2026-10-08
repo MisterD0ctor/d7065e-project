@@ -125,6 +125,62 @@ func TestModeAlerts(t *testing.T) {
 	}
 }
 
+// T-12 on the dashboard: a sensor the controller has found stuck is named in
+// an alert with what was found and what the system does about it, and its
+// room loses its colour in that sensor's layer. The next normal decision
+// clears both.
+func TestStuckSensors(t *testing.T) {
+	b := New()
+	for _, kind := range []string{rooms.CO2, rooms.Occupancy, rooms.Temp} {
+		b.Observe(obs("level0/1570", kind, 21, 0))
+		b.Observe(obs("level0/A109", kind, 21, 0))
+	}
+	b.Decide(msg.Decision{Room: "level0/1570", ModelTime: at(0), Mode: "degraded_co2", Fault: "CO₂ sensor has read 512 ppm 5 times in a row", AirflowTarget: ptr(385), Status: 202})
+	b.Decide(msg.Decision{Room: "level0/1570", ModelTime: at(0), Mode: "degraded_temp", Fault: "Temperature sensor has read 20.7 °C 12 times in a row", SetpointTarget: ptr(21), Status: 202})
+	b.Decide(msg.Decision{Room: "level0/A109", ModelTime: at(0), Mode: "degraded_occupancy", Fault: "Occupancy counter has read 40 for 25 min, but CO₂ is 12 ppm above outdoor", AirflowTarget: ptr(10), Status: 202})
+	b.Decide(msg.Decision{Room: "level0/A109", ModelTime: at(0), Mode: "normal", SetpointTarget: ptr(21), Status: 202})
+
+	got := titles(b.Alerts())
+	want := "warning: CO₂ sensor in 1570 looks stuck | warning: Occupancy counter in A109 looks stuck | warning: Temperature sensor in 1570 looks stuck"
+	if got != want {
+		t.Fatalf("alerts:\n got %s\nwant %s", got, want)
+	}
+	for _, a := range b.Alerts() {
+		if a.Room == "A109" && !strings.Contains(a.Message, "has read 40 for 25 min") {
+			t.Errorf("the alert doesn't say what was found: %q", a.Message)
+		}
+	}
+	layers := b.Layers(nil)
+	for id, room := range map[string]string{"co2": "level0/1570", "temperature": "level0/1570", "occupancy": "level0/A109"} {
+		l, _ := find(layers, id)
+		if _, shown := l.Values[room]; shown {
+			t.Errorf("layer %s still colours %s from a stuck sensor", id, room)
+		}
+		if len(l.Values) != 1 {
+			t.Errorf("layer %s: the other room's healthy sensor dropped out too: %v", id, l.Values)
+		}
+	}
+
+	// Repaired: the controller decides normally again.
+	b.Decide(msg.Decision{Room: "level0/1570", ModelTime: at(1), Mode: "normal", AirflowTarget: ptr(35), Status: 202})
+	b.Decide(msg.Decision{Room: "level0/1570", ModelTime: at(1), Mode: "normal", SetpointTarget: ptr(21), Status: 202})
+	b.Decide(msg.Decision{Room: "level0/A109", ModelTime: at(1), Mode: "normal", AirflowTarget: ptr(10), Status: 202})
+	if got := b.Alerts(); len(got) != 0 {
+		t.Errorf("alerts after the sensors were repaired: %s", titles(got))
+	}
+}
+
+// A stuck sensor that then goes quiet is a silent sensor: one alert, not two.
+func TestStuckThenSilent(t *testing.T) {
+	b := New()
+	b.Observe(obs("level0/1570", rooms.CO2, 512, 0))
+	b.Decide(msg.Decision{Room: "level0/1570", ModelTime: at(0), Mode: "degraded_co2", Fault: "CO₂ sensor has read 512 ppm 5 times in a row", AirflowTarget: ptr(385), Status: 202})
+	b.Observe(obs("level0/A109", rooms.CO2, 500, 6)) // six minutes later, from another room
+	if got := titles(b.Alerts()); got != "warning: No CO₂ reading from 1570" {
+		t.Errorf("alerts: %s", got)
+	}
+}
+
 func TestAlertsAreCapped(t *testing.T) {
 	b := New()
 	for i := range 150 {

@@ -53,6 +53,9 @@ type room struct {
 	obs       map[string]reading // latest reading per sensor kind
 	predicted *reading           // people the controller is ventilating for
 	mode      string             // mode of the latest airflow decision
+	fault     string             // what the controller found wrong with a sensor in that decision
+	heatMode  string             // the same two for the latest heating decision
+	heatFault string
 	override  string             // detail of an active CO₂ override; "" if none
 	fallback  map[string]bool    // actuator kind → on fallback since its commands expired
 	rejected  map[string]reading // actuator kind → when a command was last rejected (value unused)
@@ -123,11 +126,13 @@ func (b *Board) Decide(d msg.Decision) {
 	kind := rooms.Heating
 	if d.AirflowTarget != nil {
 		kind = rooms.Damper
-		r.mode = d.Mode
+		r.mode, r.fault = d.Mode, d.Fault
 		r.predicted = nil
 		if d.PredictedOccupancy != nil {
 			r.predicted = &reading{*d.PredictedOccupancy, t}
 		}
+	} else {
+		r.heatMode, r.heatFault = d.Mode, d.Fault
 	}
 	if d.Status == 202 {
 		// The actuator has a valid command again.
@@ -159,11 +164,29 @@ func (b *Board) Event(e msg.Event) {
 
 func (b *Board) fresh(r reading) bool { return b.newest.Sub(r.at) <= StaleAfter }
 
+// stuck returns what the controller found wrong with a sensor that is still
+// reporting, or "" (FR-7). A sensor that has since gone quiet is silent, not
+// stuck, and gets that alert instead.
+func (b *Board) stuck(r *room, kind string) string {
+	if o, ok := r.obs[kind]; !ok || !b.fresh(o) {
+		return ""
+	}
+	switch {
+	case kind == rooms.CO2 && r.mode == "degraded_co2",
+		kind == rooms.Occupancy && r.mode == "degraded_occupancy":
+		return r.fault
+	case kind == rooms.Temp && r.heatMode == "degraded_temp":
+		return r.heatFault
+	}
+	return ""
+}
+
 // Layers builds the heatmaps. airflowPct is each room's airflow as a share of
 // its maximum, which the caller reads from the actuators' reported states.
-// Rooms without a fresh value are left out of a layer, and a layer nobody has
-// values for is left out altogether (the predicted occupancy, under a policy
-// that doesn't forecast).
+// Rooms without a fresh value are left out of a layer, and so are rooms whose
+// sensor the controller has found stuck: neither is a measurement. A layer
+// nobody has values for is left out altogether (the predicted occupancy,
+// under a policy that doesn't forecast).
 func (b *Board) Layers(airflowPct map[rooms.Key]float64) []buildsim.RoomLayer {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -182,7 +205,7 @@ func (b *Board) Layers(airflowPct map[rooms.Key]float64) []buildsim.RoomLayer {
 	for k, r := range b.rooms {
 		key := k.String()
 		for kind, l := range map[string]*buildsim.RoomLayer{rooms.CO2: &co2, rooms.Occupancy: &people, rooms.Temp: &temp} {
-			if o, ok := r.obs[kind]; ok && b.fresh(o) {
+			if o, ok := r.obs[kind]; ok && b.fresh(o) && b.stuck(r, kind) == "" {
 				l.Values[key] = o.value
 			}
 		}
@@ -215,6 +238,13 @@ var sensorNames = map[string]string{rooms.CO2: "CO₂", rooms.Temp: "temperature
 
 var actuatorNames = map[string]string{rooms.Damper: "Damper", rooms.Heating: "Radiator valve"}
 
+// What a stuck sensor is called in an alert, and what the system does about it.
+var stuckAlerts = map[string][2]string{
+	rooms.CO2:       {"CO₂ sensor", "The damper is held at design flow."},
+	rooms.Temp:      {"Temperature sensor", "The radiator valve is held at 21 °C."},
+	rooms.Occupancy: {"Occupancy counter", "The controller goes by the forecast and CO₂."},
+}
+
 // Alerts lists what is wrong right now, most severe first. It is the current
 // picture only; storage is the audit trail.
 func (b *Board) Alerts() []buildsim.Alert {
@@ -240,6 +270,11 @@ func (b *Board) Alerts() []buildsim.Alert {
 					fmt.Sprintf("Last reading at %s, %.0f min ago.%s", o.at.Format("15:04"), b.newest.Sub(o.at).Minutes(), consequence(kind)))
 			}
 		}
+		for kind, text := range stuckAlerts {
+			if fault := b.stuck(r, kind); fault != "" {
+				add("warning", "stuck-"+kind, k, fmt.Sprintf("%s in %s looks stuck", text[0], k.Name), fault+". "+text[1])
+			}
+		}
 		for kind := range r.fallback {
 			add("warning", "fallback-"+kind, k, fmt.Sprintf("%s in %s on fallback", actuatorNames[kind], k.Name),
 				"Its commands expired, so it went to its safe default.")
@@ -251,8 +286,9 @@ func (b *Board) Alerts() []buildsim.Alert {
 		}
 		switch r.mode {
 		case "degraded_occupancy":
-			// A silent counter already has its own alert saying the same.
-			if o, ok := r.obs[rooms.Occupancy]; !ok || b.fresh(o) {
+			// A silent or a stuck counter already has its own alert saying
+			// the same.
+			if o, ok := r.obs[rooms.Occupancy]; (!ok || b.fresh(o)) && b.stuck(r, rooms.Occupancy) == "" {
 				add("warning", "mode", k, "No occupancy count in "+k.Name, "The controller is going by the forecast and CO₂ only.")
 			}
 		case "no_forecast":

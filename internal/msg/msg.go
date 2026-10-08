@@ -49,6 +49,7 @@ type Decision struct {
 	ModelTime          string             `json:"model_time"`
 	Policy             string             `json:"policy"`
 	Mode               string             `json:"mode"`
+	Fault              string             `json:"fault,omitempty"` // what is wrong with the sensor behind a degraded mode
 	Observed           map[string]float64 `json:"observed"`
 	PredictedOccupancy *float64           `json:"predicted_occupancy,omitempty"`
 	LeadMin            float64            `json:"lead_min,omitempty"`

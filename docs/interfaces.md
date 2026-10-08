@@ -209,6 +209,7 @@ Published once per control period (60 model-s) per room.
   "model_time": "2026-09-14T10:15:00",
   "policy": "predictive",
   "mode": "normal",
+  "fault": "",
   "observed": {"co2": 612, "temp": 21.3, "occupancy": 6},
   "predicted_occupancy": 25,
   "lead_min": 12,
@@ -227,11 +228,26 @@ warm by then (D-6). For `predictive` and `oracle`,
 `predicted_occupancy` is the number of people ventilated for (the most of the
 count now and the forecast within `lead_min`).
 
-`mode` is `normal`; `degraded_occupancy` (the occupancy count is stale or
-missing, so the decision rests on the forecast and CO₂); `no_forecast` (no
-trained model yet, so `predictive` acts as `reactive`); or `degraded_co2`
-(CO₂ missing: no command is sent, and the damper's TTL returns it to design
-flow). `viz` turns non-normal modes into alerts (FR-7).
+`mode` says what the decision rests on:
+
+| `mode` | Meaning | What is commanded |
+|---|---|---|
+| `normal` | Every input is trusted | The policy's flow; the heating schedule |
+| `no_forecast` | No trained model yet | `predictive` acts as `reactive` |
+| `degraded_occupancy` | The occupancy count is stale, missing or stuck (`predictive` only: no other policy uses it) | The flow for the forecast and CO₂, without the count |
+| `degraded_co2` | The CO₂ sensor is stuck | Design flow |
+| `degraded_temp` | The temperature sensor is stuck (heating decisions) | 21 °C |
+
+`fault` is set when the controller found a sensor stuck (D-11) and says what
+it saw, e.g. `CO₂ sensor has read 425 ppm 5 times in a row` or `Occupancy
+counter has read 32 for 69 min, but CO₂ is 158 ppm above outdoor: that many
+people would keep it at least 216 above`. It is empty when the count is
+merely stale or missing.
+
+A **silent** CO₂ or temperature sensor produces no decisions at all:
+decisions are made per reading, so the room's actuator gets no commands, its
+TTL expires and it goes to the same fallback on its own (IF-8). `viz` turns
+non-normal modes into alerts (IF-11, FR-7).
 
 ## IF-7. Actuator events `event/<level>/<room>`
 
@@ -386,7 +402,8 @@ Open the viewer on a layer with
   room's maximum from the registry (IF-12): an office's 20 l/s and a lecture
   room's 900 l/s would not fit one scale.
 - **A room drops out of a layer** when its reading is more than 180 model-s
-  old: a stale colour would claim something nobody measured.
+  old, or when the controller has found that sensor stuck (IF-6): either
+  colour would claim something nobody measured.
 - The people layers carry no unit, because the viewer prints it straight
   after the number; their labels say "People".
 
@@ -397,9 +414,10 @@ changes and again every 30 real seconds:
 |---|---|---|---|
 | `critical` | CO₂ override in *room* | actuator event `override_co2` | `override_released` |
 | `warning` | No CO₂ / temperature / occupancy reading from *room* | the sensor's last reading being more than 180 model-s old | its next reading |
+| `warning` | CO₂ sensor / temperature sensor / occupancy counter in *room* looks stuck | a decision with a `fault` (IF-6), while the sensor is still reporting. The message is the fault and what the system does about it | the next decision without one |
 | `warning` | Damper / radiator valve in *room* on fallback | actuator event `ttl_expired` | the next command it accepts |
 | `warning` | Command rejected in *room* | actuator event `rejected` | 5 model-minutes later |
-| `warning` | No occupancy count in *room* | a decision with `mode: degraded_occupancy` (unless the counter already has a silent-sensor alert) | the next normal decision |
+| `warning` | No occupancy count in *room* | a decision with `mode: degraded_occupancy` (unless the counter already has a silent or a stuck alert) | the next normal decision |
 | `info` | No trained model | decisions with `mode: no_forecast`, one notice for the whole building | the next normal decisions |
 
 - Past 100, the last entry says how many more there are.

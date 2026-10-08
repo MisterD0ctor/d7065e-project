@@ -154,6 +154,24 @@ truth sample per two model-minutes, 99.6 % of samples equal between runs).
   policy. The run in between, `eval-predictive-v2`, is kept in storage as the
   evidence for the predictor flaw.
 
+## The stuck-sensor detector, added afterwards
+
+The controller's stuck-sensor detector (FR-7, D-11) was added on 2026-10-08,
+after these runs. It can change a decision only when it finds a sensor
+stuck, so the runs' own readings were replayed through it
+(`cmd/evaluate -stuck-check`, T-38):
+
+| Run | CO₂ readings | Temperature readings | Counter checks | Sensors called stuck |
+|---|---|---|---|---|
+| `eval-constant-v2` | 360 550 | 360 550 | 360 550 | 0 |
+| `eval-reactive-v2` | 360 568 | 360 568 | 360 568 | 0 |
+| `eval-oracle-v2` | 359 380 | 360 196 | 359 380 | 0 |
+| `eval-predictive-v3` | 360 498 | 360 500 | 360 498 | 0 |
+
+No verdict, so the numbers above are what the current code would produce on
+the same readings. It is also the detector's false-alarm count on 1 000
+room-days of the system's own data: none.
+
 ## Generated tables
 
 ### Per run

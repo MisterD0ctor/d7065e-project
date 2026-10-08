@@ -6,11 +6,16 @@
 //	go run ./cmd/evaluate -runs eval-constant,eval-reactive,eval-predictive,eval-oracle \
 //	    -accuracy-run eval-reactive -out results/
 //
+// With -stuck-check it also replays each run's sensor readings through the
+// stuck-sensor detector (FR-7, T-38): on a run without injected faults, every
+// verdict is a false alarm.
+//
 // It reads finished runs from storage, so the truth it uses is a recording.
 package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/csv"
 	"encoding/json"
 	"flag"
@@ -24,7 +29,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/MisterD0ctor/d7065e-project/internal/devreg"
+	"github.com/MisterD0ctor/d7065e-project/internal/msg"
 	"github.com/MisterD0ctor/d7065e-project/internal/predict"
+	"github.com/MisterD0ctor/d7065e-project/internal/registry"
+	"github.com/MisterD0ctor/d7065e-project/internal/rooms"
+	"github.com/MisterD0ctor/d7065e-project/internal/sizing"
+	"github.com/MisterD0ctor/d7065e-project/internal/stuck"
 )
 
 var client = &http.Client{Timeout: 10 * time.Minute}
@@ -35,6 +46,8 @@ func main() {
 	runs := flag.String("runs", "", "comma-separated runs to compare")
 	accRun := flag.String("accuracy-run", "", "run whose occupancy readings test the predictor (not a training run)")
 	out := flag.String("out", "results", "directory for CSV output")
+	stuckToo := flag.Bool("stuck-check", false, "also replay each run's readings through the stuck-sensor detector")
+	reg := flag.String("registry", "http://127.0.0.1:8070", "registry URL, for room sizes (-stuck-check)")
 	flag.Parse()
 	if *runs == "" {
 		log.Fatal("-runs is required")
@@ -63,6 +76,11 @@ func main() {
 	if *accRun != "" {
 		if err := accuracy(*storage, *accRun, roles); err != nil {
 			log.Fatalf("accuracy: %v", err)
+		}
+	}
+	if *stuckToo {
+		if err := stuckCheck(*storage, *reg, strings.Split(*runs, ",")); err != nil {
+			log.Fatalf("stuck check: %v", err)
 		}
 	}
 }
@@ -356,6 +374,101 @@ func abs(x float64) float64 {
 		return -x
 	}
 	return x
+}
+
+// ---- the stuck-sensor detector on recorded readings ----
+
+// stuckCheck replays each run's sensor readings through the stuck-sensor
+// detector in the order the controller would get them, and reports every
+// verdict. The counter is checked in every run here, although only the
+// predictive policy uses it: the readings don't depend on who listens.
+func stuckCheck(storage, registryURL string, runs []string) error {
+	devs, err := devreg.New(registryURL).List(context.Background(), registry.Filter{Kind: rooms.Damper})
+	if err != nil {
+		return fmt.Errorf("registry: %w", err)
+	}
+	sizes := map[rooms.Key]sizing.Room{}
+	for _, d := range devs {
+		if k, err := rooms.Parse(d.Room); err == nil {
+			sizes[k] = d.Size
+		}
+	}
+
+	type reading struct {
+		msg.Observation
+		t time.Time
+		k rooms.Key
+	}
+	fmt.Println()
+	fmt.Println("## Stuck-sensor detector on the recorded readings")
+	fmt.Println()
+	fmt.Println("Every verdict in a run without injected faults is a false alarm.")
+	fmt.Println()
+	fmt.Println("| Run | CO₂ readings | Temperature readings | Counter checks | CO₂ sensors called stuck | Temperature sensors called stuck | Counters called stuck |")
+	fmt.Println("|---|---|---|---|---|---|---|")
+	var verdicts []string
+	for _, run := range runs {
+		run = strings.TrimSpace(run)
+		var all []reading
+		for _, kind := range []string{rooms.Occupancy, rooms.CO2, rooms.Temp} {
+			err := stream(storage, run, kind, func(b []byte) {
+				var r reading
+				if json.Unmarshal(b, &r.Observation) != nil {
+					return
+				}
+				var errT, errK error
+				r.t, errT = time.Parse(time.RFC3339, r.ModelTime)
+				r.k, errK = rooms.Parse(r.Room)
+				if errT == nil && errK == nil {
+					all = append(all, r)
+				}
+			})
+			if err != nil {
+				return err
+			}
+		}
+		// By model time; the streams were appended count first, and the sort
+		// keeps that order within a minute.
+		sort.SliceStable(all, func(i, j int) bool { return all[i].t.Before(all[j].t) })
+
+		det := stuck.New()
+		checked, called := map[string]int{}, map[string]int{}
+		was := map[string]bool{} // by sensor id, or room for the counter
+		verdict := func(id, kind string, r reading, why string, stuck bool) {
+			if stuck && !was[id] {
+				called[kind]++
+				verdicts = append(verdicts, fmt.Sprintf("- `%s` %s %s: %s", run, r.Room, r.t.Format("Mon 15:04"), why))
+			}
+			was[id] = stuck
+		}
+		for _, r := range all {
+			switch r.Kind {
+			case rooms.Occupancy:
+				det.Count(r.k, r.t, r.Value)
+			case rooms.CO2, rooms.Temp:
+				checked[r.Kind]++
+				n, flat := det.Flat(r.SensorID, r.Kind, r.Value)
+				verdict(r.SensorID, r.Kind, r, fmt.Sprintf("%s sensor read %v %d times in a row", r.Kind, r.Value, n), flat)
+				if r.Kind != rooms.CO2 || flat {
+					continue
+				}
+				det.CO2(r.k, r.t, r.Value)
+				if size, ok := sizes[r.k]; ok {
+					checked[rooms.Occupancy]++
+					why, stuck := det.Counter(r.k, size, r.t)
+					verdict(r.Room, rooms.Occupancy, r, why, stuck)
+				}
+			}
+		}
+		fmt.Printf("| `%s` | %d | %d | %d | %d | %d | %d |\n", run,
+			checked[rooms.CO2], checked[rooms.Temp], checked[rooms.Occupancy],
+			called[rooms.CO2], called[rooms.Temp], called[rooms.Occupancy])
+	}
+	if len(verdicts) > 0 {
+		fmt.Println()
+		fmt.Println(strings.Join(verdicts, "\n"))
+	}
+	return nil
 }
 
 // ---- storage and occupancysim ----
