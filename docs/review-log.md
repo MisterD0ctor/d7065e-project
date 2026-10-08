@@ -4,6 +4,29 @@ Two things the oral exam asks about (Lecture 1, slide 55): where AI advice was
 wrong and how we caught it, and why the design looks the way it does. Add an
 entry whenever either happens. Newest first.
 
+## 2026-10-06: second evaluation
+
+Five runs with the three fixes below, all complete, no gaps (sleep was
+blocked with `systemd-inhibit` this time). Results in
+[evaluation-results.md](evaluation-results.md).
+
+| Finding | How it was caught | Fix |
+|---|---|---|
+| The fixes held at full scale: the four runs have the same head-count and guard count in all 360 550 shared truth records; comfort is 100 % under every policy; 99.9 % or more of sensor readings arrived | Diffing the runs' truth; `cmd/evaluate` | — |
+| The predictive policy went from +10 % to +25 % energy over reactive | The summary table: the other three policies rose ~2.5 % (the pre-heating), predictive 17 % | Not fixed yet, see below |
+| Cause: the new model expects ≥ 1 person in ~86 % of all slots in every room, nights included (the first model: 17–26 %). Empty rooms at night got 30.9 l/s under predictive, 7.5 l/s under reactive | Inspecting the stored model, then the airflow in empty rooms | Proposed: a robust value per slot instead of the highest reading, and treat a forecast below half a person as empty. Then repeat only the predictive run |
+
+AI advice that was wrong here, twice over:
+- `predict.Train` takes the **highest** occupancy reading per slot and day.
+  The occupancy sensor reports one person too many in ~5 % of readings, so
+  with 15 readings per slot an empty room looks occupied in most slots. The
+  predictor's unit tests used noise-free data and passed.
+- For this evaluation the training week was moved from factor 300 to factor
+  120 "so the predictor trains on a reading every minute instead of every
+  five". That gave five times the data and made the model worse, because it
+  gave the noise five times the chances per slot. Caught only by comparing
+  the two evaluations.
+
 ## 2026-10-06: heating, guards, and reproducible days
 
 Three follow-ups to the first evaluation. All three change what the
