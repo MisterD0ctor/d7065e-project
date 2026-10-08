@@ -135,6 +135,8 @@ services:
     environment:
       STORAGE_URL: http://storage:8080
       TRAIN_RUNS: ${TRAIN_RUNS:-}
+      TRAIN_FROM: ${TRAIN_FROM:-}     # optional bounds on the readings used,
+      TRAIN_UNTIL: ${TRAIN_UNTIL:-}   # model time, RFC 3339; until is exclusive
       MODEL_NAME: ${MODEL_NAME:-}
     depends_on: [storage]
 

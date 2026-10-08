@@ -43,10 +43,12 @@ func reactiveFlow(size sizing.Room, co2 float64) float64 {
 }
 
 // peopleFlow is the flow the workplace rule asks for n people (AFS: 7 l/s
-// per person plus 0.35 l/s·m²), capped at the room's maximum. No people, no
-// demand: the actuator's floors take over.
+// per person plus 0.35 l/s·m²), capped at the room's maximum. Fewer than half
+// a person expected counts as an empty room: no demand, and the actuator's
+// floors take over. Without that cut-off any trace of expected occupancy
+// would switch on the whole per-area part of the flow.
 func peopleFlow(size sizing.Room, n float64) float64 {
-	if n <= 0 {
+	if n < 0.5 {
 		return 0
 	}
 	return min(sizing.PerPersonLs*n+sizing.PerAreaLs*size.AreaM2, size.Max)

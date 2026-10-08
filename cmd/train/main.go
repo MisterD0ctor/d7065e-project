@@ -4,6 +4,10 @@
 // picks up the newest model on its own.
 //
 //	TRAIN_RUNS=train-a,train-b docker compose run --rm train
+//
+// TRAIN_FROM and TRAIN_UNTIL (model time, RFC 3339; until is exclusive) bound
+// the readings used. Give them when a run holds more than the training span:
+// without them every reading stored under the run id counts.
 package main
 
 import (
@@ -26,11 +30,21 @@ func main() {
 	runs := strings.Split(env.Must("TRAIN_RUNS"), ",")
 	name := env.String("MODEL_NAME", "profile-"+time.Now().UTC().Format("20060102T150405"))
 	client := &http.Client{Timeout: 5 * time.Minute}
+	span := ""
+	for param, v := range map[string]string{"from": env.String("TRAIN_FROM", ""), "to": env.String("TRAIN_UNTIL", "")} {
+		if v == "" {
+			continue
+		}
+		if _, err := time.Parse(time.RFC3339, v); err != nil {
+			log.Fatalf("TRAIN_FROM and TRAIN_UNTIL must be RFC 3339: %v", err)
+		}
+		span += "&" + param + "=" + url.QueryEscape(v)
+	}
 
 	var obs []predict.Observation
 	for _, run := range runs {
 		run = strings.TrimSpace(run)
-		u := fmt.Sprintf("%s/history?run=%s&kind=occupancy", storage, url.QueryEscape(run))
+		u := fmt.Sprintf("%s/history?run=%s&kind=occupancy%s", storage, url.QueryEscape(run), span)
 		resp, err := client.Get(u)
 		if err != nil {
 			log.Fatalf("storage: %v", err)

@@ -13,8 +13,9 @@ blocked with `systemd-inhibit` this time). Results in
 | Finding | How it was caught | Fix |
 |---|---|---|
 | The fixes held at full scale: the four runs have the same head-count and guard count in all 360 550 shared truth records; comfort is 100 % under every policy; 99.9 % or more of sensor readings arrived | Diffing the runs' truth; `cmd/evaluate` | — |
-| The predictive policy went from +10 % to +25 % energy over reactive | The summary table: the other three policies rose ~2.5 % (the pre-heating), predictive 17 % | Not fixed yet, see below |
-| Cause: the new model expects ≥ 1 person in ~86 % of all slots in every room, nights included (the first model: 17–26 %). Empty rooms at night got 30.9 l/s under predictive, 7.5 l/s under reactive | Inspecting the stored model, then the airflow in empty rooms | Proposed: a robust value per slot instead of the highest reading, and treat a forecast below half a person as empty. Then repeat only the predictive run |
+| The predictive policy went from +10 % to +25 % energy over reactive | The summary table: the other three policies rose ~2.5 % (the pre-heating), predictive 17 % | Fixed 2026-10-08, see the next row |
+| Cause: the new model expects ≥ 1 person in ~86 % of all slots in every room, nights included (the first model: 17–26 %). Empty rooms at night got 30.9 l/s under predictive, 7.5 l/s under reactive | Inspecting the stored model, then the airflow in empty rooms | `predict.Train` takes the 75th percentile of a slot's readings per day instead of the highest; a forecast below half a person counts as empty. Retrained on the stored training week (`profile-train-week-v3`) and only the predictive run repeated (`eval-predictive-v3`): the model expects nobody at night, empty rooms at night get 8.7 l/s, and energy is +3.8 % over reactive (the oracle: +1.4 %) with no occupied minute above 1000 ppm |
+| The first retrain reported "6 weekdays" for a five-day training week | The trainer's own log line | When the next run reset the clock, the previous run's physics and sensors were still alive and recorded 50 readings at the new start time under the old run id. `train` now takes explicit bounds (`TRAIN_FROM`, `TRAIN_UNTIL`), and `deploy/evaluate.sh` stops physics before it moves the clock. `eval-predictive-v3` has no stray records |
 
 AI advice that was wrong here, twice over:
 - `predict.Train` takes the **highest** occupancy reading per slot and day.
@@ -26,6 +27,12 @@ AI advice that was wrong here, twice over:
   five". That gave five times the data and made the model worse, because it
   gave the noise five times the chances per slot. Caught only by comparing
   the two evaluations.
+
+A regression test now trains on a week of minute readings from an empty room
+with the counter's noise (`TestTrainIgnoresCounterNoise`); it fails with the
+old behaviour in the very first slot. That only the predictive run had to be
+repeated is the reproducibility fix paying off: the other three runs are
+valid as they stand, because the simulated week is identical.
 
 ## 2026-10-06: heating, guards, and reproducible days
 

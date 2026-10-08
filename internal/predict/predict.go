@@ -5,6 +5,13 @@
 // The profile keeps, per 15-minute slot, the mean count and a high quantile.
 // The controller ventilates for the high quantile: running a fan a little
 // early costs less energy than catching up on stale air (proposal §1).
+//
+// The readings are noisy: the counter reports one person too many in about
+// 5 % of them (FR-2). Each day's value for a slot is therefore a high
+// percentile of that slot's readings, not the highest one. The first version
+// took the highest, and with a reading per minute an empty room then looked
+// occupied in most slots: the second evaluation's model expected someone in
+// 86 % of all slots, at night too (docs/evaluation-results.md).
 package predict
 
 import (
@@ -19,6 +26,12 @@ const (
 	SlotsPerDay = 24 * 60 / SlotMinutes
 	// Quantile is the share of observed days the prediction must cover.
 	Quantile = 0.8
+	// SlotQuantile picks a day's value for a slot from that slot's readings.
+	// At 0.75, a count has to show in more than a quarter of them (four
+	// minutes of fifteen, at a reading per minute) to register: a gathering
+	// does, a stray false reading doesn't. It needs several readings per slot
+	// to work; with three or fewer it is the highest reading again.
+	SlotQuantile = 0.75
 )
 
 // Observation is one occupancy reading, as storage returns it.
@@ -28,8 +41,8 @@ type Observation struct {
 	ModelTime string  `json:"model_time"`
 }
 
-// RoomProfile holds, per slot of a weekday, the mean and the Quantile of the
-// highest count seen in that slot on each training day.
+// RoomProfile holds, per slot of a weekday, the mean and the Quantile across
+// the training days of each day's value for the slot (see SlotQuantile).
 type RoomProfile struct {
 	Mean [SlotsPerDay]float64 `json:"mean"`
 	High [SlotsPerDay]float64 `json:"high"`
@@ -37,11 +50,12 @@ type RoomProfile struct {
 }
 
 type Profile struct {
-	Name      string                 `json:"name"`
-	SlotMin   int                    `json:"slot_min"`
-	Quantile  float64                `json:"quantile"`
-	TrainedOn TrainedOn              `json:"trained_on"`
-	Rooms     map[string]RoomProfile `json:"rooms"`
+	Name         string                 `json:"name"`
+	SlotMin      int                    `json:"slot_min"`
+	Quantile     float64                `json:"quantile"`
+	SlotQuantile float64                `json:"slot_quantile"`
+	TrainedOn    TrainedOn              `json:"trained_on"`
+	Rooms        map[string]RoomProfile `json:"rooms"`
 }
 
 type TrainedOn struct {
@@ -62,8 +76,8 @@ func weekday(t time.Time) bool {
 // Train builds a profile from occupancy readings. Weekend readings are
 // ignored: the building is empty then, and the profile is for weekdays.
 func Train(name string, runIDs []string, obs []Observation) (Profile, error) {
-	// room → slot → day → peak count in that slot on that day
-	peaks := map[string]map[int]map[string]float64{}
+	// room → slot → day → every count read in that slot on that day
+	readings := map[string]map[int]map[string][]float64{}
 	days := map[string]bool{}
 	var from, to time.Time
 	n := 0
@@ -80,16 +94,14 @@ func Train(name string, runIDs []string, obs []Observation) (Profile, error) {
 		if t.After(to) {
 			to = t
 		}
-		if peaks[o.Room] == nil {
-			peaks[o.Room] = map[int]map[string]float64{}
+		if readings[o.Room] == nil {
+			readings[o.Room] = map[int]map[string][]float64{}
 		}
 		s := slot(t)
-		if peaks[o.Room][s] == nil {
-			peaks[o.Room][s] = map[string]float64{}
+		if readings[o.Room][s] == nil {
+			readings[o.Room][s] = map[string][]float64{}
 		}
-		if v, seen := peaks[o.Room][s][day]; !seen || o.Value > v {
-			peaks[o.Room][s][day] = o.Value
-		}
+		readings[o.Room][s][day] = append(readings[o.Room][s][day], o.Value)
 		n++
 	}
 	if n == 0 {
@@ -97,19 +109,20 @@ func Train(name string, runIDs []string, obs []Observation) (Profile, error) {
 	}
 
 	p := Profile{
-		Name: name, SlotMin: SlotMinutes, Quantile: Quantile,
+		Name: name, SlotMin: SlotMinutes, Quantile: Quantile, SlotQuantile: SlotQuantile,
 		TrainedOn: TrainedOn{
 			RunIDs: runIDs, From: from.Format(time.RFC3339), To: to.Format(time.RFC3339),
 			Weekdays: len(days), Readings: n,
 		},
 		Rooms: map[string]RoomProfile{},
 	}
-	for room, slots := range peaks {
+	for room, slots := range readings {
 		var rp RoomProfile
 		for s, byDay := range slots {
 			var vals []float64
 			var sum float64
-			for _, v := range byDay {
+			for _, counts := range byDay {
+				v := quantile(counts, SlotQuantile)
 				vals = append(vals, v)
 				sum += v
 			}

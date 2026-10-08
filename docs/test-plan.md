@@ -44,6 +44,7 @@ under load), **eval** (full evaluation runs).
 | T-32 | Policies differ only where they should (`policy_test.go`) | unit | FR-9 | Constant = design flow; reactive ignores people; predictive ventilates for expected people in clean air and still reacts to CO₂; flows capped at the room's maximum |
 | T-33 | The live run's truth over the storage API | integration | §0 scope | `403`; a finished run's truth is served (for the oracle) |
 | T-34 | Optimal start of the heating (`heating_test.go`): a cold room before a weekday morning, a room warming faster than assumed, a warm room, a weekend, a clock moved back | unit + integration | NFR-2, D-6 | The setback ends 2 h 15 min before 07:00 for a room at 18 °C and not a minute earlier; the pre-heat doesn't flip back; warm rooms and weekends stay in setback. Live: rooms are at or above 20 °C at 07:00 |
+| T-35 | The predictor's training on noisy counts (`predict_test.go`): a week of minute readings from an empty room with the counter's ±1 noise; a gathering lasting five minutes of a slot; a count showing for two minutes | unit | FR-4 | The model expects nobody in the empty room in any slot; the five-minute gathering registers at its full size; the two-minute count does not. (The first version of the training failed the first check in 86 % of slots, found in the second evaluation) |
 
 T-22 is the grade-5 test ("finds the limits", Lecture 1, slide 53): report
 where the system stops working, not only that 50 rooms work.

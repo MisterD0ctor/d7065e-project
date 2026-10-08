@@ -42,6 +42,16 @@ func TestPoliciesDiffer(t *testing.T) {
 	}
 }
 
+// Less than half a person expected is an empty room: no people-driven flow.
+func TestTraceOfOccupancyIsNoDemand(t *testing.T) {
+	if got := peopleFlow(lecture, 0.3); got != 0 {
+		t.Errorf("0.3 people expected: %v l/s, want 0", got)
+	}
+	if got, want := peopleFlow(lecture, 1), sizing.PerPersonLs+sizing.PerAreaLs*80; got != want {
+		t.Errorf("1 person: %v l/s, want %v", got, want)
+	}
+}
+
 func TestOracleLooksAhead(t *testing.T) {
 	nine := time.Date(2026, 10, 5, 9, 0, 0, 0, time.UTC)
 	o := &oracleForecast{byRoom: map[string]map[int64]int{

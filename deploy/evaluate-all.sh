@@ -23,7 +23,9 @@ train_factor=${TRAIN_FACTOR:-$factor}
 deploy/evaluate.sh "train-week$suffix" reactive "$train_start" "$days" "$train_factor"
 
 echo "$(date +%T) training on train-week$suffix"
+train_end=$(date -u -d "$train_start + $days days" +%F)
 TRAIN_RUNS="train-week$suffix" MODEL_NAME="profile-train-week$suffix" \
+  TRAIN_FROM="${train_start}T00:00:00Z" TRAIN_UNTIL="${train_end}T00:00:00Z" \
   docker compose run --rm --no-deps train 2>&1 | { grep -v '^ Container ' || true; }
 
 deploy/evaluate.sh "eval-reactive$suffix"   reactive   "$eval_start" "$days" "$factor"

@@ -325,18 +325,23 @@ Model format (the per-room time-of-day profile, FR-4), written by `train`:
 
 ```json
 {
-  "name": "profile-20261001T120000",
+  "name": "profile-train-week-v3",
   "slot_min": 15,
   "quantile": 0.8,
-  "trained_on": {"run_ids": ["train-1"], "from": "…", "to": "…", "weekdays": 5, "readings": 140000},
+  "slot_quantile": 0.75,
+  "trained_on": {"run_ids": ["train-week-v2"], "from": "…", "to": "…", "weekdays": 5, "readings": 360000},
   "rooms": {"level0/1570": {"mean": [0, …], "high": [0, …], "days": [5, …]}}
 }
 ```
 
-96 slots per room (15 min each), weekdays only. `mean` is the mean of each
-day's peak count in the slot; `high` the 80 % quantile across days, which is
-what the controller ventilates for. Trained on **occupancy sensor readings**,
-never on the truth.
+96 slots per room (15 min each), weekdays only. A day's value for a slot is
+the `slot_quantile` of that slot's readings: at 0.75 a count has to show in
+more than a quarter of them to register, so a gathering does and the
+counter's stray false readings don't. `mean` is the mean of those values
+across the training days; `high` their `quantile` (80 %), which is what the
+controller ventilates for. A forecast below half a person is treated as an
+empty room. Trained on **occupancy sensor readings**, never on the truth.
+`train` takes `TRAIN_FROM` and `TRAIN_UNTIL` to bound the readings used.
 
 **The live run's truth is not served:** `GET /history?kind=truth` or
 `kind=true_occupancy` for storage's own `RUN_ID` returns `403`. The oracle

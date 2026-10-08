@@ -20,6 +20,10 @@ post() { curl -sf -X POST "$clock" -H 'Content-Type: application/json' -d "$1" >
 log() { echo "$(date +%T) [$run_id] $*"; }
 
 log "pausing the clock at $start 00:00"
+# Stop physics before the clock moves. Still tagged with the previous run, it
+# would otherwise compute the new start time and the sensors would report it,
+# leaving stray records under the old run id.
+docker compose stop physics >/dev/null 2>&1 || true
 post "{\"running\": false}"
 post "{\"date\": \"$start\", \"time\": \"00:00\", \"factor\": $factor}"
 
