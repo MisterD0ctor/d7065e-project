@@ -10,6 +10,7 @@ import (
 	"github.com/MisterD0ctor/d7065e-project/internal/buildsim"
 	"github.com/MisterD0ctor/d7065e-project/internal/msg"
 	"github.com/MisterD0ctor/d7065e-project/internal/rooms"
+	"github.com/MisterD0ctor/d7065e-project/internal/sizing"
 )
 
 var ten = time.Date(2026, 9, 21, 10, 0, 0, 0, time.UTC)
@@ -48,7 +49,10 @@ func TestLayersShowTheLatestReadings(t *testing.T) {
 	b.Observe(obs("level0/1570", rooms.Temp, 21.4, 1))
 	b.Decide(msg.Decision{Room: "level0/1570", ModelTime: at(1), Mode: "normal", AirflowTarget: ptr(140), PredictedOccupancy: ptr(18), Status: 202})
 
-	layers := b.Layers(map[rooms.Key]float64{{Level: "level0", Name: "1570"}: 44})
+	k := rooms.Key{Level: "level0", Name: "1570"}
+	b.SetRooms(map[rooms.Key]sizing.Room{k: {Max: 300}})
+	b.Tick(map[rooms.Key]float64{k: 132}) // l/s: 44 % of the room's maximum
+	layers := b.Layers()
 	for id, want := range map[string]float64{"co2": 712, "occupancy": 16, "temperature": 21.4, "occupancy_predicted": 18, "airflow": 44} {
 		l, ok := find(layers, id)
 		if !ok || l.Values["level0/1570"] != want {
@@ -63,7 +67,7 @@ func TestEmptyLayersAreLeftOut(t *testing.T) {
 	b := New()
 	b.Observe(obs("level0/1570", rooms.CO2, 640, 0))
 	b.Decide(msg.Decision{Room: "level0/1570", ModelTime: at(0), Mode: "normal", AirflowTarget: ptr(35), Status: 202})
-	if _, ok := find(b.Layers(nil), "occupancy_predicted"); ok {
+	if _, ok := find(b.Layers(), "occupancy_predicted"); ok {
 		t.Error("an empty predicted-occupancy layer was published")
 	}
 }
@@ -77,7 +81,7 @@ func TestSilentSensor(t *testing.T) {
 	for min := 1; min <= 6; min++ {
 		b.Observe(obs("level0/A109", rooms.CO2, 500, min)) // 1570's sensor has died
 	}
-	co2, _ := find(b.Layers(nil), "co2")
+	co2, _ := find(b.Layers(), "co2")
 	if _, shown := co2.Values["level0/1570"]; shown {
 		t.Error("a six-minute-old reading is still coloured in the CO₂ layer")
 	}
@@ -150,7 +154,7 @@ func TestStuckSensors(t *testing.T) {
 			t.Errorf("the alert doesn't say what was found: %q", a.Message)
 		}
 	}
-	layers := b.Layers(nil)
+	layers := b.Layers()
 	for id, room := range map[string]string{"co2": "level0/1570", "temperature": "level0/1570", "occupancy": "level0/A109"} {
 		l, _ := find(layers, id)
 		if _, shown := l.Values[room]; shown {
@@ -209,7 +213,7 @@ func TestClockMovedBackStartsOver(t *testing.T) {
 	if got := b.Alerts(); len(got) != 0 {
 		t.Errorf("alerts from before the clock moved: %s", titles(got))
 	}
-	co2, _ := find(b.Layers(nil), "co2")
+	co2, _ := find(b.Layers(), "co2")
 	if len(co2.Values) != 1 || co2.Values["level0/A109"] != 450 {
 		t.Errorf("CO₂ layer after the clock moved back: %v", co2.Values)
 	}
@@ -238,7 +242,7 @@ func TestPalettes(t *testing.T) {
 	b := New()
 	b.Observe(obs("level0/1570", rooms.CO2, 640, 0))
 	b.Observe(obs("level0/1570", rooms.Temp, 21, 0))
-	layers := b.Layers(nil)
+	layers := b.Layers()
 	for id, target := range map[string]float64{"co2": CO2Limit, "temperature": ComfortCentre} {
 		l, _ := find(layers, id)
 		if (l.Minimum+l.Maximum)/2 != target {

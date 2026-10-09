@@ -4,6 +4,43 @@ Two things the oral exam asks about (Lecture 1, slide 55): where AI advice was
 wrong and how we caught it, and why the design looks the way it does. Add an
 entry whenever either happens. Newest first.
 
+## 2026-10-09: graphs on the dashboard
+
+The dashboard was the BuildSim viewer's layers and alerts only (D-8, option
+A). It now also has its own page with graphs over time, served by `viz`
+(`http://127.0.0.1:8060`, IF-11): the building, and every room, up to a week
+back, with the periods an alert was active.
+
+| Finding | How it was caught | Fix |
+|---|---|---|
+| Storage can't feed graphs directly: it answers every history query by reading the run's whole file | Reading `store.History` before designing the page | `viz` holds the recent history itself, a point per room and model minute, and uses storage once, to refill after a restart. Measured on the development run: 9.9 million records in 49 s |
+| Old records fed through the normal path would have raised alerts, and reset the dashboard: an older model time looks like the clock being moved back | Thinking the refill through before writing it | A separate path that touches only the history (`TestBackfillOnlyTouchesTheHistory`) |
+| At factor 120 the dashboard ticks every second model minute, so the airflow line and the alert shading would have had a hole every other minute | Same | A tick fills the minutes since the last one, up to five (`TestAlertLogAndSeverity`) |
+| A lost occupancy reading would show as people leaving the building for a minute | Same | In the building's sums a room's last value stands in for up to three minutes (`TestBuildingHistory`) |
+| A redraw every two seconds took the keyboard's crosshair back to "now" | Reading the redraw code; then a scripted test in a headless browser: 40 key presses, two redraws, same moment | The drawing is swapped without the blur and focus handlers reacting |
+| The first alert shading was a heavy yellow block over the whole plot | Screenshot | A light wash with a solid strip along the top |
+| The development run had grown to about 10 million records overnight, and the storage volume to 7.3 GB | The refill's record count | The stack was left running at factor 60 after the fault tests. Pause the clock when nobody is watching: `curl -X POST localhost:8081/api/clock -H 'Content-Type: application/json' -d '{"running": false}'` |
+
+What the graphs made visible that the numbers had not: the predictive
+policy's forecast summed over the building runs well ahead of the people
+counted in the morning (57 ventilated for with 6 counted at 09:29 on the
+development run). That is the extra energy over the reactive policy, as a
+picture.
+
+AI advice that was wrong here:
+- D-8's first recommendation: the viewer's layers are the dashboard, and
+  plots come from storage offline. It answered "what is the building doing
+  now" and left out "how did it get there", which is most of what a
+  ventilation system is asked.
+- The live test of the fault tests left the simulation running overnight
+  "so the dashboard is live", without a word about what that writes to disk.
+
+How the colours and the form were checked instead of eyeballed: the two
+series colours through the palette validator in light and dark mode (worst
+pair under simulated colour blindness ΔE 24.7 and 26.8, target 8); one unit
+per graph, no second axis; every graph with a table of its values; screenshots
+of both views in both modes.
+
 ## 2026-10-08: the stuck-sensor detector
 
 FR-7 promised a fallback for a *stuck* sensor and nothing detected one (the

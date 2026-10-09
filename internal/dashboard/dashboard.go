@@ -1,6 +1,7 @@
 // Package dashboard turns the stream of observations, decisions and actuator
-// events into what the BuildSim viewer shows (IF-11, FR-10): one heatmap
-// layer per measure, and the alerts that are current right now.
+// events into what the dashboard shows (IF-11, FR-10): in the BuildSim
+// viewer, one heatmap layer per measure and the alerts that are current right
+// now; on viz's own page, the graphs of how each room got there (history.go).
 //
 // It only ever sees what the control system sees: sensor readings, the
 // controller's decisions and the actuators' events. The truth is not on any
@@ -16,6 +17,7 @@ import (
 	"github.com/MisterD0ctor/d7065e-project/internal/buildsim"
 	"github.com/MisterD0ctor/d7065e-project/internal/msg"
 	"github.com/MisterD0ctor/d7065e-project/internal/rooms"
+	"github.com/MisterD0ctor/d7065e-project/internal/sizing"
 )
 
 const (
@@ -60,16 +62,33 @@ type room struct {
 	fallback  map[string]bool    // actuator kind → on fallback since its commands expired
 	rejected  map[string]reading // actuator kind → when a command was last rejected (value unused)
 	rejectMsg map[string]string
+	hist      series // the room minute by minute, for the graphs
 }
 
-// Board is the current picture of the building, as the dashboard knows it.
+// Board is the building as the dashboard knows it: the current picture, and
+// the history behind the graphs.
 type Board struct {
 	mu     sync.Mutex
 	rooms  map[rooms.Key]*room
 	newest time.Time // newest model time seen on any message
+
+	sizes  map[rooms.Key]sizing.Room // from the registry
+	flows  map[rooms.Key]float64     // airflow each damper has reached, l/s
+	policy string                    // of the latest decision
+
+	lastTick int64                     // model minute of the last Tick
+	active   map[string]buildsim.Alert // the alerts at the last Tick, by id
+	log      []LogEntry                // alerts appearing and going, oldest first
 }
 
 func New() *Board { return &Board{rooms: map[rooms.Key]*room{}} }
+
+// SetRooms tells the board each room's sizing, which the registry holds.
+func (b *Board) SetRooms(sizes map[rooms.Key]sizing.Room) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.sizes = sizes
+}
 
 func (b *Board) room(key string) (rooms.Key, *room, bool) {
 	k, err := rooms.Parse(key)
@@ -95,6 +114,7 @@ func (b *Board) seen(modelTime string) time.Time {
 		// over. (Messages a little out of order are far inside this margin.)
 		b.rooms = map[rooms.Key]*room{}
 		b.newest = t
+		b.lastTick, b.active, b.log = 0, nil, nil
 	}
 	if t.After(b.newest) {
 		b.newest = t
@@ -111,6 +131,9 @@ func (b *Board) Observe(o msg.Observation) {
 		if prev, had := r.obs[o.Kind]; !had || !t.Before(prev.at) {
 			r.obs[o.Kind] = reading{o.Value, t}
 		}
+		if p := r.hist.at(minute(t)); p != nil {
+			p.observe(o)
+		}
 	}
 }
 
@@ -122,6 +145,12 @@ func (b *Board) Decide(d msg.Decision) {
 	_, r, ok := b.room(d.Room)
 	if !ok {
 		return
+	}
+	b.policy = d.Policy
+	if d.ModelTime != "" {
+		if p := r.hist.at(minute(t)); p != nil {
+			p.decide(d)
+		}
 	}
 	kind := rooms.Heating
 	if d.AirflowTarget != nil {
@@ -181,13 +210,13 @@ func (b *Board) stuck(r *room, kind string) string {
 	return ""
 }
 
-// Layers builds the heatmaps. airflowPct is each room's airflow as a share of
-// its maximum, which the caller reads from the actuators' reported states.
-// Rooms without a fresh value are left out of a layer, and so are rooms whose
-// sensor the controller has found stuck: neither is a measurement. A layer
-// nobody has values for is left out altogether (the predicted occupancy,
-// under a policy that doesn't forecast).
-func (b *Board) Layers(airflowPct map[rooms.Key]float64) []buildsim.RoomLayer {
+// Layers builds the heatmaps. The airflow is each damper's reached state
+// (Tick) as a share of the room's maximum (SetRooms). Rooms without a fresh
+// value are left out of a layer, and so are rooms whose sensor the controller
+// has found stuck: neither is a measurement. A layer nobody has values for is
+// left out altogether (the predicted occupancy, under a policy that doesn't
+// forecast).
+func (b *Board) Layers() []buildsim.RoomLayer {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -213,8 +242,10 @@ func (b *Board) Layers(airflowPct map[rooms.Key]float64) []buildsim.RoomLayer {
 			expected.Values[key] = r.predicted.value
 		}
 	}
-	for k, pct := range airflowPct {
-		air.Values[k.String()] = pct
+	for k, flow := range b.flows {
+		if most := b.sizes[k].Max; most > 0 {
+			air.Values[k.String()] = 100 * flow / most
+		}
 	}
 
 	var out []buildsim.RoomLayer
@@ -245,12 +276,25 @@ var stuckAlerts = map[string][2]string{
 	rooms.Occupancy: {"Occupancy counter", "The controller goes by the forecast and CO₂."},
 }
 
-// Alerts lists what is wrong right now, most severe first. It is the current
-// picture only; storage is the audit trail.
+// Alerts lists what is wrong right now for the viewer, most severe first and
+// at most MaxAlerts. It is the current picture only; storage is the audit
+// trail.
 func (b *Board) Alerts() []buildsim.Alert {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	alerts := b.current()
+	if len(alerts) > MaxAlerts {
+		more := len(alerts) - (MaxAlerts - 1)
+		alerts = append(alerts[:MaxAlerts-1], buildsim.Alert{
+			ID: "more", Severity: "info", Title: fmt.Sprintf("%d more alerts", more),
+			Message: "The viewer shows at most 100; storage has every event.",
+		})
+	}
+	return alerts
+}
 
+// current is every alert, most severe first. The caller holds the lock.
+func (b *Board) current() []buildsim.Alert {
 	var alerts []buildsim.Alert
 	add := func(severity, kind string, k rooms.Key, title, message string) {
 		alerts = append(alerts, buildsim.Alert{
@@ -309,13 +353,6 @@ func (b *Board) Alerts() []buildsim.Alert {
 		}
 		return alerts[i].ID < alerts[j].ID
 	})
-	if len(alerts) > MaxAlerts {
-		more := len(alerts) - (MaxAlerts - 1)
-		alerts = append(alerts[:MaxAlerts-1], buildsim.Alert{
-			ID: "more", Severity: "info", Title: fmt.Sprintf("%d more alerts", more),
-			Message: "The viewer shows at most 100; storage has every event.",
-		})
-	}
 	return alerts
 }
 

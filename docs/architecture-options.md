@@ -358,12 +358,27 @@ dashboard". Lecture 1 lists the dashboard as its own process (slide 17).
 | Option | Pro | Con |
 |---|---|---|
 | **A. A `viz` container, the only writer of room layers and alerts. It subscribes to `obs/#`, `decision/#` and `event/#` and `PUT`s the room layers (measured CO₂, people counted, people expected, airflow, temperature) plus `/api/alerts` for overrides, silent sensors and actuators on fallback (IF-11)** | The 3D view from the proposal for free; `viz` is our own process, so it counts as the dashboard | No history in the viewer |
-| B. Own web dashboard (time-series charts, e.g. Grafana over storage) | Shows history, which the viewer can't | A container to build or configure |
+| **B. Own web page with graphs over time, served by the same `viz` process** | Shows history, which the viewer can't: how a room got to where it is, and what the building has used | A page to build; the history has to be held somewhere |
+| C. Grafana over storage | Graphs without writing a page | A container to configure, plus a data source for our JSONL; storage reads the whole run for every query (IF-10), so it would need an index first |
 
-**Chosen: A (built 2026-10-08), plus plots generated offline for the report.**
-B stays out unless time allows before 12 Oct. Show **measured** CO₂, not true CO₂: the truth
-never enters BuildSim (Lecture 2, slide 8). The truth appears only in the
-evaluation.
+**Chosen: A (built 2026-10-08) and B (2026-10-09).** A alone was the first
+decision, with plots made offline for the report. It was not enough: the
+viewer shows the building *now*, and the questions asked of a ventilation
+system are about time (did the air stay good through the lecture, when did
+the damper open, what did the fault do). B is one page with no outside
+dependencies, so it also works without internet in the lab.
+
+The graphs' history is held in `viz`'s memory, a point per room and model
+minute for a week (about 16 MB for 50 rooms), because a page that redraws
+every two seconds can't wait for storage to read a whole run. Storage stays
+the owner of the history (D-4): after a restart `viz` reads the run so far
+from it, so a killed dashboard comes back with its graphs (NFR-6).
+
+Show **measured** CO₂, not true CO₂: the truth never enters BuildSim
+(Lecture 2, slide 8), and it never reaches `viz` either. The truth appears
+only in the evaluation. The one derived number on the page, ventilation
+power, is computed from the airflow the dampers report with the energy
+proxy's constants (IF-11).
 
 Two points from the lab quickstart to respect in the report:
 - It shows truth in a room layer (`"source": "simulation truth"`), which
@@ -553,7 +568,7 @@ report §10.
 | FR-7 | Degraded mode: if a sensor is stale (> 3 missed samples) or stuck (repeating one value, D-11), the system falls back. A bad occupancy sensor means reacting to CO₂ and the forecast; a bad CO₂ sensor means design flow; a bad temperature sensor means 21 °C. A stuck CO₂ sensor is found within 5 samples and a stuck temperature sensor within 12; a stuck counter once the room's CO₂ contradicts it. The decision names the mode and the fault, which `viz` shows as an alert | T-12, T-13, T-36 to T-38 |
 | FR-8 | Every observation, ground-truth value, command and decision is stored with model time and a run id | Check: a run's JSONL files can rebuild its report plots |
 | FR-9 | The policy is chosen by a flag: `constant`, `reactive`, `predictive`, `oracle`. Everything else is identical between runs | Config diff between runs shows only the policy changed |
-| FR-10 | The BuildSim viewer shows measured CO₂, measured and predicted occupancy, airflow and temperature per room, plus alerts for overrides, silent sensors and actuators on fallback | T-16 |
+| FR-10 | The BuildSim viewer shows measured CO₂, measured and predicted occupancy, airflow and temperature per room, plus alerts for overrides, silent or stuck sensors and actuators on fallback. `viz`'s own page shows the same per room and for the whole building as graphs over time, up to a week back, with the periods an alert was active | T-16, T-39 |
 | FR-11 | Devices are commissioned in the registry: a device does nothing until an installer has registered its id, kind and room, and the registry keeps BuildSim's equipment list in step with what is installed, also after a BuildSim restart | T-17, T-28–T-30 |
 
 ### Non-functional
@@ -625,7 +640,7 @@ is why the maximum sits above design.
 | D-5 | Decomposition of autonomy | Validation, prediction and policy in one controller; training as a batch job | Predictor as its own service | FR-3, FR-4 | Parts of the controller can't be restarted separately |
 | D-6 | Safety filter placement | In the actuator, independent of the controller | Inside the controller, after the policy | FR-5, FR-6, NFR-6 | The actuator needs sizing data and the CO₂ stream |
 | D-7 | Baselines/oracle | Policy interface with four implementations; the oracle replays recorded truth | Oracle reading occupancysim's plans | FR-9, NFR-7 | Depends on same-seed runs being identical, which needed the D-1 change |
-| D-8 | Dashboard | `viz` process publishing room layers and alerts to the BuildSim viewer | Own web dashboard | FR-10, FR-7 | No history in the live view; plots come from storage offline |
+| D-8 | Dashboard | `viz` process: room layers and alerts in the BuildSim viewer, and its own page with graphs over time | Grafana over storage; the viewer alone | FR-10, FR-7 | The graphs' history is a second copy in `viz`'s memory, refilled from storage after a restart; the airflow reached before a restart is not recovered |
 | D-9 | Actuator granularity | One container per actuator device | One container per kind for all rooms | FR-5, NFR-6 | ~100 actuator containers, generated |
 | D-10 | Device commissioning | Registry service with SQLite; devices learn their room at check-in | Device lists in configuration; registering straight in BuildSim | FR-11 | One more service on the start-up path; no device authentication |
 | D-11 | Stuck-sensor detection | Run of identical readings for CO₂ and temperature; the counter against two CO₂ mass-balance bounds that hold for any airflow | "Counter unchanged while CO₂ moves"; estimating the head-count from CO₂ and the airflow | FR-7 | Blind to small over-counts; a counter is found only after the room's air disagrees (15–20 min in a lecture room, 75 in an office) |

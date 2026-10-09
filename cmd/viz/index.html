@@ -1,0 +1,714 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Building dashboard</title>
+<style>
+/* Colour roles. Series colours carry identity only: blue is what was
+   measured or reached, orange what the controller expected or commanded.
+   The status colours are for alerts and nothing else. */
+:root {
+  color-scheme: light;
+  --page: #f9f9f7; --surface: #fcfcfb; --border: rgba(11,11,11,.10);
+  --ink: #0b0b0b; --ink2: #52514e; --muted: #898781; --grid: #e1e0d9; --axis: #c3c2b7;
+  --s1: #2a78d6; --s2: #eb6834; --track: #cde2fb;
+  --good: #0ca30c; --warning: #fab219; --critical: #d03b3b;
+  --wash-warning: rgba(250,178,25,.13); --wash-critical: rgba(208,59,59,.11);
+  --band: rgba(11,11,11,.05);
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --border: rgba(255,255,255,.10);
+    --ink: #ffffff; --ink2: #c3c2b7; --muted: #898781; --grid: #2c2c2a; --axis: #383835;
+    --s1: #3987e5; --s2: #d95926; --track: #104281;
+    --wash-warning: rgba(250,178,25,.12); --wash-critical: rgba(208,59,59,.16);
+    --band: rgba(255,255,255,.06);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface: #1a1a19; --border: rgba(255,255,255,.10);
+  --ink: #ffffff; --ink2: #c3c2b7; --muted: #898781; --grid: #2c2c2a; --axis: #383835;
+  --s1: #3987e5; --s2: #d95926; --track: #104281;
+  --wash-warning: rgba(250,178,25,.12); --wash-critical: rgba(208,59,59,.16);
+  --band: rgba(255,255,255,.06);
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+a { color: inherit; }
+h1 { font-size: 18px; margin: 0; font-weight: 600; }
+h2 { font-size: 15px; margin: 0 0 8px; font-weight: 600; }
+.muted { color: var(--muted); }
+.wrap { max-width: 1320px; margin: 0 auto; padding: 0 16px 40px; }
+.top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 20px; padding: 14px 16px 10px; max-width: 1320px; margin: 0 auto; }
+.top .meta { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; color: var(--ink2); }
+.top .grow { flex: 1; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; min-width: 0; }
+.chip { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--border); border-radius: 999px; padding: 1px 9px; font-size: 12px; color: var(--ink2); white-space: nowrap; }
+.chip svg { flex: none; }
+
+.filters { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin: 4px 0 14px; }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: var(--surface); }
+.seg button { font: inherit; color: var(--ink2); background: none; border: 0; padding: 5px 12px; cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--border); }
+.seg button:hover { background: var(--band); }
+.seg button[aria-pressed="true"] { color: var(--ink); font-weight: 600; background: var(--band); }
+select { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; }
+button:focus-visible, select:focus-visible, a:focus-visible, svg:focus-visible, summary:focus-visible { outline: 2px solid var(--s1); outline-offset: 2px; }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin-bottom: 12px; }
+.tile .label { color: var(--ink2); }
+.tile .value { font-size: 30px; font-weight: 600; line-height: 1.2; }
+.tile .value small { font-size: 15px; font-weight: 500; color: var(--ink2); }
+.tile .sub { color: var(--muted); font-size: 13px; }
+
+.charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(400px, 100%), 1fr)); gap: 12px; margin-bottom: 12px; }
+.charts.stack { grid-template-columns: 1fr; }
+figure { margin: 0; }
+figcaption .head { display: flex; align-items: baseline; gap: 10px; }
+figcaption .title { font-weight: 600; font-size: 15px; }
+figcaption .when { color: var(--muted); font-size: 13px; margin-left: auto; white-space: nowrap; font-variant-numeric: tabular-nums; }
+figcaption .note { color: var(--muted); font-size: 13px; }
+.key { display: flex; flex-wrap: wrap; gap: 2px 16px; align-items: center; min-height: 24px; margin-top: 2px; color: var(--ink2); font-size: 13px; }
+.key .item { display: inline-flex; align-items: center; gap: 6px; }
+.key strong { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.plot { position: relative; margin-top: 2px; }
+.plot svg { display: block; width: 100%; }
+.plot text { font-size: 11px; fill: var(--muted); font-variant-numeric: tabular-nums; }
+.plot text.ref { fill: var(--ink2); }
+.plot text.empty { font-size: 13px; }
+.tip { position: absolute; z-index: 5; pointer-events: none; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; font-size: 12px; box-shadow: 0 4px 14px rgba(0,0,0,.14); white-space: nowrap; }
+.tip .t { color: var(--ink2); margin-bottom: 3px; }
+.tip .row { display: flex; align-items: center; gap: 6px; }
+.tip .row strong { font-variant-numeric: tabular-nums; min-width: 34px; text-align: right; }
+.tip .row span { color: var(--ink2); }
+details.table { margin-top: 6px; font-size: 13px; }
+details.table summary { cursor: pointer; color: var(--ink2); width: fit-content; }
+.tablewrap { max-height: 260px; overflow: auto; margin-top: 6px; border: 1px solid var(--border); border-radius: 6px; }
+
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { padding: 5px 10px; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; border-bottom: 1px solid var(--grid); }
+th:first-child, td:first-child { text-align: left; }
+th { position: sticky; top: 0; background: var(--surface); color: var(--ink2); font-weight: 600; }
+th button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+th[aria-sort] button::after { content: " ▾"; }
+th[aria-sort="ascending"] button::after { content: " ▴"; }
+tbody tr:hover { background: var(--band); }
+td.l, th.l { text-align: left; }
+.meter { display: inline-block; vertical-align: middle; width: 70px; height: 6px; border-radius: 3px; background: var(--track); margin-right: 8px; overflow: hidden; }
+.meter span { display: block; height: 100%; background: var(--s1); border-radius: 3px; }
+.roomlist { padding: 0; overflow: hidden; }
+.roomlist h2 { padding: 14px 16px 0; }
+.roomlist .scroll { overflow-x: auto; }
+
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(400px, 100%), 1fr)); gap: 12px; margin-bottom: 12px; }
+ul.alerts, ul.log { list-style: none; margin: 0; padding: 0; }
+ul.alerts li { display: flex; gap: 9px; padding: 7px 0; border-bottom: 1px solid var(--grid); }
+ul.alerts li:last-child, ul.log li:last-child { border-bottom: 0; }
+ul.alerts svg { flex: none; margin-top: 2px; }
+ul.alerts .msg { color: var(--ink2); font-size: 13px; }
+ul.log { max-height: 300px; overflow: auto; font-size: 13px; }
+ul.log li { display: flex; gap: 10px; padding: 4px 0; border-bottom: 1px solid var(--grid); }
+ul.log time { color: var(--muted); font-variant-numeric: tabular-nums; flex: none; width: 92px; white-space: nowrap; }
+ul.log .what { color: var(--ink2); flex: none; width: 54px; }
+
+.roomhead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin-bottom: 12px; }
+.roomhead h2 { font-size: 20px; margin: 0; }
+.stale .card { opacity: .55; }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header class="top">
+  <h1>Building dashboard</h1>
+  <div class="meta">
+    <span id="clock">Waiting for the first reading…</span>
+    <span id="policy" class="chip" hidden></span>
+  </div>
+  <span class="grow"></span>
+  <a id="viewer" href="#">3D view of the building</a>
+</header>
+
+<main class="wrap" id="main">
+  <div class="filters">
+    <div class="seg" id="range" role="group" aria-label="Time range"></div>
+    <label>Room <select id="room"><option value="">Whole building</option></select></label>
+    <span id="status" class="muted" role="status"></span>
+  </div>
+
+  <section id="building">
+    <div class="tiles" id="tiles"></div>
+    <div class="charts" id="bcharts"></div>
+    <div class="two">
+      <div class="card"><h2>Alerts now</h2><ul class="alerts" id="alerts"></ul></div>
+      <div class="card"><h2>Alert history</h2><ul class="log" id="log"></ul></div>
+    </div>
+    <div class="card roomlist">
+      <h2>Rooms</h2>
+      <div class="scroll"><table id="rooms"><thead></thead><tbody></tbody></table></div>
+    </div>
+  </section>
+
+  <section id="roomview" hidden>
+    <div class="roomhead">
+      <a href="#" id="back">← Whole building</a>
+      <h2 id="roomname"></h2>
+      <span id="roomfacts" class="muted"></span>
+    </div>
+    <div class="two">
+      <div class="card"><h2>Alerts now</h2><ul class="alerts" id="ralerts"></ul></div>
+      <div class="card"><h2>Alert history</h2><ul class="log" id="rlog"></ul></div>
+    </div>
+    <div class="charts stack" id="rcharts"></div>
+  </section>
+</main>
+
+<script>
+'use strict';
+
+// ---- small helpers ----
+
+const SVG = 'http://www.w3.org/2000/svg';
+
+// h builds an HTML element. Text always goes in through textContent: room
+// names and alert messages come from other services.
+function h(tag, attrs, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === 'text') e.textContent = v;
+    else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
+    else if (v !== false && v != null) e.setAttribute(k, v === true ? '' : v);
+  }
+  for (const kid of kids) if (kid != null) e.append(kid);
+  return e;
+}
+
+function s(tag, attrs) {
+  const e = document.createElementNS(SVG, tag);
+  for (const [k, v] of Object.entries(attrs || {})) e.setAttribute(k, v);
+  return e;
+}
+
+const $ = id => document.getElementById(id);
+const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const two = n => String(n).padStart(2, '0');
+
+// Model time is written as UTC everywhere in the system, so it is shown as such.
+function hhmm(sec) { const d = new Date(sec * 1000); return two(d.getUTCHours()) + ':' + two(d.getUTCMinutes()); }
+function day(sec) { const d = new Date(sec * 1000); return DAYS[d.getUTCDay()] + ' ' + d.getUTCDate(); }
+function dayTime(sec) { return day(sec) + ' ' + hhmm(sec); }
+function fmt(v, digits) {
+  if (v == null) return '–';
+  return v.toLocaleString('en-US', { minimumFractionDigits: digits || 0, maximumFractionDigits: digits || 0 });
+}
+const last = values => { for (let i = values.length - 1; i >= 0; i--) if (values[i] != null) return values[i]; return null; };
+
+function lineKey(color, size) {
+  const g = s('svg', { width: size || 16, height: 8, 'aria-hidden': 'true' });
+  g.append(s('line', { x1: 1, y1: 4, x2: (size || 16) - 1, y2: 4, stroke: color, 'stroke-width': 2, 'stroke-linecap': 'round' }));
+  return g;
+}
+
+// A status always comes as an icon and a word, never as a colour alone.
+const STATUS = [
+  { word: 'OK', color: 'var(--good)' },
+  { word: 'Warning', color: 'var(--warning)' },
+  { word: 'Critical', color: 'var(--critical)' },
+];
+const RANK = { info: 0, warning: 1, critical: 2 };
+
+function statusIcon(rank, info) {
+  const g = s('svg', { width: 16, height: 16, viewBox: '0 0 16 16', 'aria-hidden': 'true' });
+  if (info) {
+    g.append(s('circle', { cx: 8, cy: 8, r: 6.5, fill: 'none', stroke: 'var(--muted)', 'stroke-width': 1.5 }));
+    g.append(s('path', { d: 'M8 7.2v4M8 4.6v.4', stroke: 'var(--muted)', 'stroke-width': 1.6, 'stroke-linecap': 'round' }));
+  } else if (rank === 2) {
+    g.append(s('path', { d: 'M5.2 1.5h5.6l3.7 3.7v5.6l-3.7 3.7H5.2l-3.7-3.7V5.2z', fill: 'var(--critical)' }));
+    g.append(s('path', { d: 'M8 4.6v4.2M8 11v.4', stroke: '#fff', 'stroke-width': 1.7, 'stroke-linecap': 'round' }));
+  } else if (rank === 1) {
+    g.append(s('path', { d: 'M8 1.6 15 14H1z', fill: 'var(--warning)', stroke: 'var(--warning)', 'stroke-width': 1.2, 'stroke-linejoin': 'round' }));
+    g.append(s('path', { d: 'M8 6v4M8 12v.3', stroke: '#0b0b0b', 'stroke-width': 1.6, 'stroke-linecap': 'round' }));
+  } else {
+    g.append(s('circle', { cx: 8, cy: 8, r: 7, fill: 'var(--good)' }));
+    g.append(s('path', { d: 'M4.8 8.2 7 10.4l4.2-4.6', fill: 'none', stroke: '#fff', 'stroke-width': 1.7, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }));
+  }
+  return g;
+}
+
+// ---- charts ----
+
+// A group of charts shares one crosshair: pointing at a moment in one shows
+// the same moment in all of them.
+function chartGroup() {
+  return {
+    charts: [], at: null, owner: null,
+    hover(at, owner) { this.at = at; this.owner = owner; for (const c of this.charts) c.drawHover(); },
+  };
+}
+
+function niceStep(raw) {
+  const pow = Math.pow(10, Math.floor(Math.log10(raw)));
+  const f = raw / pow;
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * pow;
+}
+
+const GAP = 3;      // a line runs on over this many missing minutes, no further
+const HEIGHT = 200; // the plot and its time axis
+const MARGIN = { l: 46, r: 14, t: 10, b: 22 };
+
+// makeChart adds a chart card to parent and returns it. update(spec) redraws:
+//   start, step      model time of the first value (s) and between values
+//   minutes          the time range shown, ending at the newest value
+//   unit, digits     for values in the readout, the tooltip and the table
+//   soft [lo, hi]    a range the y-axis always covers
+//   series           [{name, color, values, area}], the last one drawn on top
+//   refs             [{value, label}] limits, drawn dashed with their label
+//   band             [lo, hi, label], a shaded range of values
+//   severity         per value: 0, 1 (warning) or 2 (critical), shaded in time
+function makeChart(parent, group, title, note) {
+  const key = h('div', { class: 'key' });
+  const plot = h('div', { class: 'plot' });
+  const tip = h('div', { class: 'tip', hidden: true });
+  const tableWrap = h('div', { class: 'tablewrap' });
+  const details = h('details', { class: 'table' }, h('summary', { text: 'Table' }), tableWrap);
+  const when = h('span', { class: 'when' });
+  const fig = h('figure', { class: 'card' },
+    h('figcaption', null, h('div', { class: 'head' }, h('span', { class: 'title', text: title }), when), h('div', { class: 'note', text: note })),
+    key, plot, details);
+  parent.append(fig);
+  plot.append(tip);
+
+  let spec = null, geo = null, svg = null, hoverLayer = null, swapping = false;
+  const chart = { update, drawHover };
+  group.charts.push(chart);
+  details.addEventListener('toggle', drawTable);
+  new ResizeObserver(() => { if (spec) draw(); }).observe(plot);
+
+  function update(next) { spec = next; draw(); if (details.open) drawTable(); }
+
+  function index(at) { return Math.round((at - spec.start) / spec.step); }
+
+  function draw() {
+    const W = Math.max(plot.clientWidth, 240), H = HEIGHT;
+    const n = spec.series.length ? spec.series[0].values.length : 0;
+    const t1 = spec.start + Math.max(n - 1, 0) * spec.step;
+    const t0 = t1 - (spec.minutes - 1) * 60;
+    const x = t => MARGIN.l + (t - t0) / Math.max(t1 - t0, 1) * (W - MARGIN.l - MARGIN.r);
+
+    // The y-axis covers the soft range, the data in view and the limits.
+    let lo = spec.soft[0], hi = spec.soft[1];
+    for (const sr of spec.series) for (let i = Math.max(index(t0), 0); i < n; i++) {
+      const v = sr.values[i];
+      if (v != null) { if (v < lo) lo = v; if (v > hi) hi = v; }
+    }
+    for (const r of spec.refs || []) { if (r.value > hi) hi = r.value; if (r.value < lo) lo = r.value; }
+    const stepY = niceStep((hi - lo) / 4 || 1);
+    lo = Math.floor(lo / stepY) * stepY; hi = Math.ceil(hi / stepY) * stepY;
+    const y = v => H - MARGIN.b - (v - lo) / (hi - lo) * (H - MARGIN.b - MARGIN.t);
+    geo = { W, H, x, y, t0, t1, n };
+
+    const old = svg;
+    svg = s('svg', { viewBox: `0 0 ${W} ${H}`, height: H, role: 'img', tabindex: 0, 'aria-label': title + '. ' + note + '. The table below the chart has the values.' });
+
+    // Shading first: the comfort range, then the times an alert was active.
+    if (spec.band) {
+      const [a, b, label] = spec.band;
+      svg.append(s('rect', { x: MARGIN.l, y: y(Math.min(b, hi)), width: W - MARGIN.l - MARGIN.r, height: Math.max(y(Math.max(a, lo)) - y(Math.min(b, hi)), 0), fill: 'var(--band)' }));
+      const t = s('text', { x: MARGIN.l + 6, y: y(Math.min(b, hi)) + 13, class: 'ref' }); t.textContent = label; svg.append(t);
+    }
+    if (spec.severity) {
+      for (let i = Math.max(index(t0), 0); i < n; i++) {
+        const sev = spec.severity[i];
+        if (!sev) continue;
+        let j = i;
+        while (j + 1 < n && spec.severity[j + 1] === sev) j++;
+        const xa = Math.max(x(spec.start + (i - .5) * spec.step), MARGIN.l), xb = Math.min(x(spec.start + (j + .5) * spec.step), W - MARGIN.r);
+        const width = Math.max(xb - xa, 1);
+        svg.append(s('rect', { x: xa, y: MARGIN.t, width, height: H - MARGIN.b - MARGIN.t, fill: sev === 2 ? 'var(--wash-critical)' : 'var(--wash-warning)' }));
+        svg.append(s('rect', { x: xa, y: MARGIN.t, width, height: 4, fill: STATUS[sev].color }));
+        i = j;
+      }
+    }
+
+    // Grid and axes: solid hairlines, one step off the surface.
+    for (let v = lo; v <= hi + stepY / 2; v += stepY) {
+      svg.append(s('line', { x1: MARGIN.l, x2: W - MARGIN.r, y1: y(v), y2: y(v), stroke: v === lo ? 'var(--axis)' : 'var(--grid)', 'stroke-width': 1 }));
+      const t = s('text', { x: MARGIN.l - 6, y: y(v) + 4, 'text-anchor': 'end' });
+      t.textContent = fmt(v, stepY < 1 ? 1 : 0); svg.append(t);
+    }
+    const span = (t1 - t0) / 60, room = Math.max(Math.floor((W - MARGIN.l - MARGIN.r) / 78), 2);
+    const every = [5, 10, 15, 30, 60, 120, 180, 360, 720, 1440].find(m => span / m <= room) || 1440;
+    for (let t = Math.ceil(t0 / (every * 60)) * every * 60; t <= t1; t += every * 60) {
+      svg.append(s('line', { x1: x(t), x2: x(t), y1: H - MARGIN.b, y2: H - MARGIN.b + 4, stroke: 'var(--axis)', 'stroke-width': 1 }));
+      const label = s('text', { x: x(t), y: H - 5, 'text-anchor': 'middle' });
+      label.textContent = hhmm(t) === '00:00' ? day(t) : hhmm(t); svg.append(label);
+    }
+
+    if (!spec.series.some(sr => sr.values.some(v => v != null))) {
+      const t = s('text', { x: (W + MARGIN.l - MARGIN.r) / 2, y: H / 2, 'text-anchor': 'middle', class: 'empty' });
+      t.textContent = 'Nothing recorded yet'; svg.append(t);
+    }
+
+    // Limits: dashed, because a limit is not data, with the label on the line
+    // at its old end, clear of the newest values.
+    for (const r of spec.refs || []) {
+      svg.append(s('line', { x1: MARGIN.l, x2: W - MARGIN.r, y1: y(r.value), y2: y(r.value), stroke: 'var(--ink2)', 'stroke-width': 1, 'stroke-dasharray': '5 4' }));
+      const t = s('text', { x: MARGIN.l + 6, y: y(r.value) - 5 < MARGIN.t + 8 ? y(r.value) + 13 : y(r.value) - 5, class: 'ref' });
+      t.textContent = r.label; svg.append(t);
+    }
+
+    for (const sr of spec.series) {
+      let d = '', area = '', prev = -99, runStart = null;
+      const closeArea = () => { if (runStart != null) area += `L${x(spec.start + prev * spec.step).toFixed(1)} ${y(lo)}L${runStart} ${y(lo)}Z`; };
+      for (let i = Math.max(index(t0), 0); i < n; i++) {
+        const v = sr.values[i];
+        if (v == null) continue;
+        const px = x(spec.start + i * spec.step).toFixed(1), py = y(v).toFixed(1);
+        if (i - prev > GAP) { closeArea(); d += `M${px} ${py}h0`; area += `M${px} ${py}`; runStart = px; }
+        else { d += `L${px} ${py}`; area += `L${px} ${py}`; }
+        prev = i;
+      }
+      closeArea();
+      if (sr.area && area) svg.append(s('path', { d: area, fill: sr.color, opacity: .1 }));
+      svg.append(s('path', { d: d || 'M0 0', fill: 'none', stroke: sr.color, 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }));
+      if (prev >= 0) svg.append(s('circle', { cx: x(spec.start + prev * spec.step), cy: y(sr.values[prev]), r: 4, fill: sr.color, stroke: 'var(--surface)', 'stroke-width': 2 }));
+    }
+
+    hoverLayer = s('g'); svg.append(hoverLayer);
+    const hit = s('rect', { x: MARGIN.l, y: 0, width: W - MARGIN.l - MARGIN.r, height: H - MARGIN.b, fill: 'transparent' });
+    svg.append(hit);
+    const point = e => {
+      const box = svg.getBoundingClientRect();
+      const t = t0 + (e.clientX - box.left - MARGIN.l) / (W - MARGIN.l - MARGIN.r) * (t1 - t0);
+      const i = Math.min(Math.max(index(t), Math.max(index(t0), 0)), n - 1);
+      if (n) group.hover(spec.start + i * spec.step, chart);
+    };
+    hit.addEventListener('pointermove', point);
+    hit.addEventListener('pointerdown', point);
+    hit.addEventListener('pointerleave', () => { if (document.activeElement !== svg) group.hover(null, null); });
+    // The keyboard gets what the pointer gets: arrows move the crosshair.
+    svg.addEventListener('focus', () => {
+      if (swapping) return;
+      if (n && group.at == null) group.hover(t1, chart); else group.hover(group.at, chart);
+    });
+    svg.addEventListener('blur', () => { if (!swapping) group.hover(null, null); });
+    svg.addEventListener('keydown', e => {
+      const move = { ArrowLeft: -1, ArrowRight: 1, PageUp: -15, PageDown: 15 }[e.key];
+      if (e.key === 'Escape') { group.hover(null, null); return; }
+      if (!move || !n) return;
+      e.preventDefault();
+      const at = (group.at == null ? t1 : group.at) + move * spec.step;
+      group.hover(Math.min(Math.max(at, Math.max(t0, spec.start)), t1), chart);
+    });
+
+    // A redraw replaces the drawing. Whoever had the keyboard in it keeps it,
+    // with the crosshair where it was.
+    const focused = old && document.activeElement === old;
+    swapping = true;
+    if (old) old.replaceWith(svg); else plot.prepend(svg);
+    if (focused) svg.focus({ preventScroll: true });
+    swapping = false;
+    drawHover();
+  }
+
+  // drawHover puts the crosshair at the group's moment and fills the readout:
+  // the values at that moment, or the newest ones when nothing is pointed at.
+  function drawHover() {
+    if (!spec || !geo) return;
+    hoverLayer.replaceChildren();
+    const at = group.at != null && group.at >= geo.t0 && group.at <= geo.t1 ? group.at : null;
+    const i = at == null ? null : index(at);
+
+    // The series drawn on top is listed first.
+    const listed = spec.series.slice().reverse();
+    key.replaceChildren();
+    for (const sr of listed) {
+      const v = i == null ? last(sr.values) : sr.values[i];
+      const item = h('span', { class: 'item' });
+      if (listed.length > 1) item.append(lineKey(sr.color), h('span', { text: sr.name }));
+      item.append(h('strong', { text: fmt(v, spec.digits) }));
+      if (listed.length === 1) item.append(h('span', { text: spec.unit }));
+      key.append(item);
+    }
+    when.textContent = at == null ? (geo.n ? 'now' : '') : dayTime(at);
+
+    if (at == null) { tip.hidden = true; return; }
+    const px = geo.x(at);
+    hoverLayer.append(s('line', { x1: px, x2: px, y1: MARGIN.t, y2: geo.H - MARGIN.b, stroke: 'var(--muted)', 'stroke-width': 1 }));
+    for (const sr of spec.series) {
+      const v = sr.values[i];
+      if (v != null) hoverLayer.append(s('circle', { cx: px, cy: geo.y(v), r: 4, fill: sr.color, stroke: 'var(--surface)', 'stroke-width': 2 }));
+    }
+    if (group.owner !== chart) { tip.hidden = true; return; }
+
+    // One tooltip, every series: the value leads, the name follows.
+    tip.replaceChildren(h('div', { class: 't', text: dayTime(at) }));
+    for (const sr of listed) {
+      tip.append(h('div', { class: 'row' }, lineKey(sr.color, 12), h('strong', { text: fmt(sr.values[i], spec.digits) }),
+        h('span', { text: listed.length > 1 ? sr.name : spec.unit })));
+    }
+    const sev = spec.severity ? spec.severity[i] : 0;
+    if (sev) tip.append(h('div', { class: 'row' }, statusIcon(sev), h('span', { text: STATUS[sev].word + ' alert active' })));
+    tip.hidden = false;
+    const left = px + 12 + tip.offsetWidth > geo.W ? px - 12 - tip.offsetWidth : px + 12;
+    tip.style.left = Math.max(left, 0) + 'px';
+    tip.style.top = MARGIN.t + 'px';
+  }
+
+  // The table view: the same values without the drawing, newest first.
+  function drawTable() {
+    if (!details.open || !spec) return;
+    const n = geo ? geo.n : 0, first = geo ? Math.max(index(geo.t0), 0) : 0;
+    const every = Math.max(Math.ceil((n - first) / 360), 1);
+    const head = h('tr', null, h('th', { text: 'Model time' }));
+    for (const sr of spec.series) head.append(h('th', { text: sr.name + (spec.unit ? ', ' + spec.unit : '') }));
+    if (spec.severity) head.append(h('th', { text: 'Alert' }));
+    const body = h('tbody');
+    for (let i = n - 1; i >= first; i -= every) {
+      const row = h('tr', null, h('td', { text: dayTime(spec.start + i * spec.step) }));
+      for (const sr of spec.series) row.append(h('td', { text: fmt(sr.values[i], spec.digits) }));
+      if (spec.severity) row.append(h('td', { text: spec.severity[i] ? STATUS[spec.severity[i]].word : '' }));
+      body.append(row);
+    }
+    const table = h('table', null, h('thead', null, head), body);
+    if (every > 1) table.prepend(h('caption', { class: 'muted', text: `One row per ${every} minutes` }));
+    tableWrap.replaceChildren(table);
+  }
+
+  return chart;
+}
+
+function sparkline(values, limit) {
+  const W = 84, H = 22, n = values.length;
+  const g = s('svg', { width: W, height: H, 'aria-hidden': 'true' });
+  let lo = 400, hi = limit, d = '', prev = -99, end = null;
+  for (const v of values) if (v != null) { if (v > hi) hi = v; if (v < lo) lo = v; }
+  const x = i => 2 + i / Math.max(n - 1, 1) * (W - 8), y = v => H - 3 - (v - lo) / (hi - lo) * (H - 6);
+  values.forEach((v, i) => {
+    if (v == null) return;
+    d += (i - prev > GAP ? 'M' : 'L') + x(i).toFixed(1) + ' ' + y(v).toFixed(1);
+    prev = i; end = [x(i), y(v)];
+  });
+  if (d) g.append(s('path', { d, fill: 'none', stroke: 'var(--muted)', 'stroke-width': 1.5, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }));
+  if (end) g.append(s('circle', { cx: end[0], cy: end[1], r: 2.5, fill: 'var(--s1)' }));
+  return g;
+}
+
+// ---- the page ----
+
+const RANGES = [[60, '1 hour'], [360, '6 hours'], [1440, '24 hours'], [10080, '7 days']];
+const state = { minutes: 360, room: '', sort: 'room', down: false, overview: null };
+
+function readHash() {
+  const p = new URLSearchParams(location.hash.slice(1));
+  state.room = p.get('room') || '';
+  state.minutes = RANGES.some(r => r[0] === +p.get('range')) ? +p.get('range') : 360;
+}
+function go(change) {
+  Object.assign(state, change);
+  const p = new URLSearchParams();
+  if (state.room) p.set('room', state.room);
+  if (state.minutes !== 360) p.set('range', state.minutes);
+  history.replaceState(null, '', '#' + p);
+  layout(); refresh();
+}
+
+const bGroup = chartGroup(), rGroup = chartGroup();
+const charts = {
+  power: makeChart($('bcharts'), bGroup, 'Ventilation power', 'kW, from the airflow the dampers report'),
+  people: makeChart($('bcharts'), bGroup, 'People in the building', 'counted, and what the controller ventilates for'),
+  co2: makeChart($('bcharts'), bGroup, 'CO₂ across the rooms', 'ppm, sensor readings'),
+  rco2: makeChart($('rcharts'), rGroup, 'CO₂', 'ppm, sensor reading'),
+  rpeople: makeChart($('rcharts'), rGroup, 'People', 'counted by the room sensor, and the number the controller ventilates for'),
+  rflow: makeChart($('rcharts'), rGroup, 'Airflow', 'l/s, what the damper was commanded to and what it has reached'),
+  rtemp: makeChart($('rcharts'), rGroup, 'Temperature', '°C, sensor reading and the radiator valve\'s setpoint'),
+};
+
+for (const [minutes, label] of RANGES) {
+  $('range').append(h('button', { type: 'button', text: label, 'data-m': minutes, onclick: () => go({ minutes }) }));
+}
+$('room').addEventListener('change', e => go({ room: e.target.value }));
+$('back').addEventListener('click', e => { e.preventDefault(); go({ room: '' }); });
+$('viewer').href = `${location.protocol}//${location.hostname}:9090/?layer=co2&floor=level0`;
+window.addEventListener('hashchange', () => { readHash(); layout(); refresh(); });
+
+function layout() {
+  for (const b of $('range').children) b.setAttribute('aria-pressed', String(+b.dataset.m === state.minutes));
+  $('building').hidden = !!state.room;
+  $('roomview').hidden = !state.room;
+  $('room').value = state.room;
+}
+
+// Series with nothing in them are left out: a policy that doesn't forecast
+// has no "ventilating for" line to show.
+const present = list => list.filter(sr => sr.values.some(v => v != null));
+
+function alertItems(list, into, none) {
+  into.replaceChildren();
+  for (const a of list) {
+    const text = h('div', null, h('div', null, h('strong', { text: a.title })), h('div', { class: 'msg', text: a.message || '' }));
+    if (a.room && !state.room) text.append(h('a', { href: '#room=' + encodeURIComponent(a.level + '/' + a.room), text: 'Show room ' + a.room }));
+    into.append(h('li', null, statusIcon(RANK[a.severity], a.severity === 'info'), text));
+  }
+  if (!list.length) into.append(h('li', null, statusIcon(0), h('div', { text: none })));
+}
+
+function logItems(list, into) {
+  into.replaceChildren();
+  for (const e of list) {
+    const t = Date.parse(e.model_time) / 1000;
+    into.append(h('li', null, h('time', { text: dayTime(t) }), h('span', { class: 'what', text: e.cleared ? 'cleared' : e.severity }), h('span', { text: e.title })));
+  }
+  if (!list.length) into.append(h('li', { class: 'muted', text: 'Nothing has happened since the dashboard started.' }));
+}
+
+function tile(label, value, unit, sub) {
+  const v = h('div', { class: 'value', text: value });
+  if (unit) v.append(' ', h('small', { text: unit }));
+  return h('div', { class: 'card tile' }, h('div', { class: 'label', text: label }), v, h('div', { class: 'sub', text: sub }));
+}
+
+const COLUMNS = [
+  ['room', 'Room', r => r.room], ['people', 'People', r => r.people], ['expected', 'Ventilating for', r => r.expected],
+  ['co2', 'CO₂, ppm', r => r.co2], ['spark', 'CO₂, last hour', null], ['flow', 'Airflow', r => r.flow_ls == null || !r.max_ls ? null : r.flow_ls / r.max_ls],
+  ['temp', '°C', r => r.temp], ['status', 'Status', r => r.severity],
+];
+
+function drawRooms(o) {
+  const head = h('tr');
+  for (const [id, label, value] of COLUMNS) {
+    const th = h('th', { class: id === 'spark' || id === 'flow' || id === 'status' ? 'l' : null });
+    if (!value) th.textContent = label;
+    else {
+      const b = h('button', { type: 'button', text: label, onclick: () => { state.down = state.sort === id ? !state.down : id !== 'room'; state.sort = id; drawRooms(state.overview); } });
+      if (state.sort === id) th.setAttribute('aria-sort', state.down ? 'descending' : 'ascending');
+      th.append(b);
+    }
+    head.append(th);
+  }
+  const value = COLUMNS.find(c => c[0] === state.sort)[2];
+  const rows = o.rooms.slice().sort((a, b) => {
+    const va = value(a), vb = value(b);
+    if (va == null || vb == null) return (va == null) - (vb == null); // rooms without a value last
+    return (va < vb ? -1 : va > vb ? 1 : 0) * (state.down ? -1 : 1);
+  });
+  const body = h('tbody');
+  for (const r of rows) {
+    const flow = h('td', { class: 'l' });
+    if (r.flow_ls != null && r.max_ls) {
+      flow.append(h('span', { class: 'meter', title: 'Share of the room\'s maximum' }, h('span', { style: `width:${Math.min(100 * r.flow_ls / r.max_ls, 100).toFixed(0)}%` })), fmt(r.flow_ls) + ' l/s');
+    } else flow.textContent = '–';
+    body.append(h('tr', null,
+      h('td', null, h('a', { href: '#room=' + encodeURIComponent(r.room), text: r.name })),
+      h('td', { text: fmt(r.people) }), h('td', { text: fmt(r.expected) }), h('td', { text: fmt(r.co2) }),
+      h('td', { class: 'l' }, sparkline(r.spark, o.limits.co2_limit)), flow, h('td', { text: fmt(r.temp, 1) }),
+      h('td', { class: 'l' }, h('span', { class: 'chip' }, statusIcon(r.severity), STATUS[r.severity].word))));
+  }
+  $('rooms').replaceChildren(h('thead', null, head), body);
+}
+
+function drawBuilding(o) {
+  const b = o.building, rooms = o.rooms;
+  const sum = f => rooms.reduce((t, r) => t + (f(r) || 0), 0);
+  const power = last(b.power_kw), over = rooms.filter(r => r.co2 > o.limits.co2_limit);
+  const worst = rooms.reduce((w, r) => r.co2 != null && (!w || r.co2 > w.co2) ? r : w, null);
+  const forecasting = rooms.some(r => r.expected != null);
+  const counts = [0, 0, 0];
+  for (const a of o.alerts) counts[RANK[a.severity]]++;
+  $('tiles').replaceChildren(
+    tile('People in the building', fmt(sum(r => r.people)), '', forecasting ? `ventilating for ${fmt(sum(r => r.expected))}` : 'counted by the room sensors'),
+    tile('Ventilation power', fmt(power, 1), 'kW', power == null || !o.constant_kw ? 'no airflow reported yet' : `fans and air heating; ${fmt(100 * power / o.constant_kw)} % of constant flow`),
+    tile('Rooms above ' + fmt(o.limits.co2_limit) + ' ppm', fmt(over.length), `of ${rooms.length}`, worst ? `highest: ${worst.name}, ${fmt(worst.co2)} ppm` : 'no CO₂ readings yet'),
+    tile('Alerts', fmt(o.alerts.length), '', o.alerts.length ? [counts[2] && `${counts[2]} critical`, counts[1] && `${counts[1]} warning`, counts[0] && `${counts[0]} notice`].filter(Boolean).join(' · ') : 'none active'));
+
+  const base = { start: b.start, step: b.step, minutes: state.minutes };
+  charts.power.update({ ...base, unit: 'kW', digits: 1, soft: [0, 1], series: [{ name: 'Ventilation power', color: 'var(--s1)', values: b.power_kw, area: true }],
+    refs: o.constant_kw ? [{ value: o.constant_kw, label: `every room at design flow: ${fmt(o.constant_kw, 1)} kW` }] : [] });
+  charts.people.update({ ...base, unit: 'people', digits: 0, soft: [0, 10], series: present([
+    { name: 'Ventilated for', color: 'var(--s2)', values: b.expected }, { name: 'Counted', color: 'var(--s1)', values: b.people }]) });
+  // The highest room is the one the limit is about; the middle room is context.
+  charts.co2.update({ ...base, unit: 'ppm', digits: 0, soft: [400, 800], series: [
+    { name: 'Middle room', color: 'var(--muted)', values: b.co2_median }, { name: 'Highest room', color: 'var(--s1)', values: b.co2_max }],
+    refs: [{ value: o.limits.co2_limit, label: `limit ${fmt(o.limits.co2_limit)} ppm` }] });
+
+  alertItems(o.alerts, $('alerts'), 'Nothing is wrong.');
+  logItems(o.log, $('log'));
+  drawRooms(o);
+}
+
+function drawRoom(o, r) {
+  const size = r.size, name = r.room.split('/')[1];
+  $('roomname').textContent = 'Room ' + name;
+  $('roomfacts').textContent = size.capacity ? `room for ${size.capacity} · ${fmt(size.area_m2)} m² · design flow ${fmt(size.design_ls)} l/s · maximum ${fmt(size.max_ls)} l/s` : '';
+  const base = { start: r.start, step: r.step, minutes: state.minutes, severity: r.severity };
+  charts.rco2.update({ ...base, unit: 'ppm', digits: 0, soft: [400, 800], series: [{ name: 'CO₂', color: 'var(--s1)', values: r.co2 }],
+    refs: [{ value: o.limits.co2_limit, label: `limit ${fmt(o.limits.co2_limit)} ppm` }, { value: o.limits.co2_override, label: `damper opens fully above ${fmt(o.limits.co2_override)} ppm` }] });
+  charts.rpeople.update({ ...base, unit: 'people', digits: 0, soft: [0, 5], series: present([
+    { name: 'Ventilated for', color: 'var(--s2)', values: r.expected }, { name: 'Counted', color: 'var(--s1)', values: r.people }]) });
+  charts.rflow.update({ ...base, unit: 'l/s', digits: 0, soft: [0, 10], series: [
+    { name: 'Commanded', color: 'var(--s2)', values: r.target }, { name: 'Reached', color: 'var(--s1)', values: r.flow }],
+    refs: size.max_ls ? [{ value: size.design_ls, label: `design flow ${fmt(size.design_ls)} l/s` }, { value: size.max_ls, label: `maximum ${fmt(size.max_ls)} l/s` }] : [] });
+  charts.rtemp.update({ ...base, unit: '°C', digits: 1, soft: [18, 25], series: [
+    { name: 'Setpoint', color: 'var(--s2)', values: r.setpoint }, { name: 'Measured', color: 'var(--s1)', values: r.temp }],
+    band: [o.limits.comfort_low, o.limits.comfort_high, `comfort range ${fmt(o.limits.comfort_low)}–${fmt(o.limits.comfort_high)} °C`] });
+  const [level, room] = r.room.split('/');
+  alertItems(o.alerts.filter(a => a.level === level && a.room === room), $('ralerts'), 'Nothing is wrong in this room.');
+  logItems(r.log, $('rlog'));
+}
+
+async function get(path) {
+  const res = await fetch(path, { cache: 'no-store' });
+  if (!res.ok) throw new Error(res.status === 404 ? 'not found' : 'status ' + res.status);
+  return res.json();
+}
+
+let busy = false;
+async function refresh() {
+  if (busy || document.hidden) return;
+  busy = true;
+  const room = state.room;
+  try {
+    const [o, r] = await Promise.all([
+      get('api/overview?minutes=' + state.minutes),
+      room ? get(`api/room?room=${encodeURIComponent(room)}&minutes=${state.minutes}`).catch(e => e) : null,
+    ]);
+    if (room !== state.room) return; // the view changed while this was on its way
+    state.overview = o;
+    const t = o.model_time ? Date.parse(o.model_time) / 1000 : null;
+    $('clock').textContent = t == null ? 'Waiting for the first reading…'
+      : `${day(t)} ${MONTHS[new Date(t * 1000).getUTCMonth()]} ${new Date(t * 1000).getUTCFullYear()}, ${hhmm(t)} model time`;
+    $('policy').hidden = !o.policy;
+    $('policy').textContent = 'Policy: ' + o.policy;
+    const select = $('room');
+    if (select.options.length !== o.rooms.length + 1) {
+      select.replaceChildren(h('option', { value: '', text: 'Whole building' }), ...o.rooms.map(x => h('option', { value: x.room, text: x.name })));
+      select.value = state.room;
+    }
+    if (!room) drawBuilding(o);
+    else if (r instanceof Error) {
+      $('roomname').textContent = 'Room ' + room.split('/').pop();
+      $('roomfacts').textContent = 'Nothing has been heard from this room yet.';
+    } else drawRoom(o, r);
+    $('status').textContent = '';
+    $('main').classList.remove('stale');
+  } catch (e) {
+    // Keep what is on screen, dimmed, rather than blanking it.
+    $('status').textContent = 'No contact with the dashboard service; showing the last picture.';
+    $('main').classList.add('stale');
+  } finally {
+    busy = false;
+  }
+}
+
+readHash();
+layout();
+refresh();
+setInterval(refresh, 2000);
+document.addEventListener('visibilitychange', refresh);
+</script>
+</body>
+</html>

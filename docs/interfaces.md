@@ -27,9 +27,9 @@ Overview:
 | IF-6 | Decisions `decision/…` | controller | storage, viz | MQTT |
 | IF-7 | Actuator events `event/…` | actuators | storage, viz | MQTT |
 | IF-8 | Actuator command | controller | actuators | REST |
-| IF-9 | Actuator state in BuildSim | each actuator device | physics, viewer | REST |
-| IF-10 | Storage API | storage | controller, train, oracle, people | REST |
-| IF-11 | Room layers and alerts | viz | viewer | REST |
+| IF-9 | Actuator state in BuildSim | each actuator device | physics, viz, viewer | REST |
+| IF-10 | Storage API | storage | controller, train, oracle, viz (at start), people | REST |
+| IF-11 | Room layers and alerts; the graphs page | viz | viewer; a browser | REST |
 | IF-12 | Device registry | registry | installer, devices, controller | REST |
 
 ---
@@ -337,6 +337,11 @@ one). Bad records are logged and counted at `GET /healthz`, never silently
 dropped. Observations are deduplicated on `(run_id, sensor_id, seq)`.
 Published on `127.0.0.1:8090` for people and notebooks.
 
+A history query reads the run's whole file and filters it. That is fine for
+training, the oracle and the evaluation, which read a run once. It is too
+slow to draw graphs from, which is why `viz` keeps its own copy of the recent
+past and comes here only once, when it starts (IF-11).
+
 Model format (the per-room time-of-day profile, FR-4), written by `train`:
 
 ```json
@@ -368,7 +373,7 @@ replays an earlier, finished run; the evaluation reads the export.
 - The oracle calls `GET /history?kind=true_occupancy` for a *recorded* run,
   never the live one (D-7).
 
-## IF-11. Room layers and alerts (viz)
+## IF-11. The dashboard: room layers, alerts and graphs (viz)
 
 `viz` is the only writer (§0: every collection `PUT` replaces everything). It
 builds both from what the control system itself sees: the observations
@@ -426,6 +431,79 @@ changes and again every 30 real seconds:
   second; the layers repair themselves within a second of BuildSim returning
   blank, the alerts within 30. If the model clock is moved back by more than
   half an hour (a new experiment), `viz` forgets the old picture.
+
+### The graphs page
+
+`http://127.0.0.1:8060`, served by `viz` itself. The viewer shows the building
+now; this page shows how it got there. It only reads.
+
+- **Building:** four headline numbers (people counted; ventilation power and
+  its share of constant flow; rooms above the CO₂ limit; alerts), three graphs
+  (ventilation power against every room at design flow; people counted and
+  ventilated for; the highest and the middle room's CO₂ against the limit),
+  the alerts now, their history, and a table of every room.
+- **Room** (click a room): CO₂ with the limit and the override level; people
+  counted and ventilated for; airflow commanded and reached, with design and
+  maximum flow; temperature and setpoint with the comfort range. The times an
+  alert was active in the room are shaded in all four.
+- The range is the last hour, 6 hours, 24 hours or 7 days of model time.
+  Pointing at a moment in one graph shows it in all of them; the arrow keys do
+  the same. Every graph has its values as a table underneath.
+
+| Call | Returns |
+|---|---|
+| `GET /` | The page: one HTML file, no outside dependencies |
+| `GET /api/overview?minutes=N` | The building view: model time, policy, the limits to draw, every registered room's current values, the building's series, the alerts and the alert log |
+| `GET /api/room?room=level0/A109&minutes=N` | One room's series and its part of the alert log. `404` for a room nothing has been heard from |
+
+Four minutes of T-12, from 12:13: the counter is stuck at 53 in an empty
+room, and at 12:16 the controller stops believing it.
+
+```json
+{
+  "room": "level0/A1519",
+  "size": {"capacity": 52, "design_ls": 400.6, "max_ls": 600.8},
+  "start": 1789992780, "step": 60,
+  "co2": [576, 582, 564, 545],
+  "people": [53, 53, 53, 53], "expected": [53, 53, 53, 0],
+  "target": [407.6, 407.6, 407.6, 36.6], "flow": [408, 408, 408, 408],
+  "temp": [21.7, 21.9, 22, 21.8], "setpoint": [21, 21, 21, 21],
+  "severity": [0, 0, 0, 1],
+  "log": [{"model_time": "2026-09-21T12:16:00Z", "severity": "warning", "title": "Occupancy counter in A1519 looks stuck", "cleared": false}]
+}
+```
+
+- **One value per model minute** from `start` (model time, Unix seconds). A
+  minute in which nothing was seen is `null` and a hole in the line: never a
+  zero, never the previous value.
+- **`flow`** is what the damper reports in BuildSim (IF-9), read once per real
+  second. **`target`** and **`setpoint`** are what the actuator accepted
+  (status 202 in IF-6); a refused or lost command leaves a hole.
+  **`expected`** is the decision's `predicted_occupancy`. **`severity`** is the
+  worst alert in the room that minute: 0 none, 1 warning, 2 critical.
+- **The building's series** are sums over the rooms. A room's last value
+  stands in for a missing one for up to three minutes (the staleness limit),
+  so a lost reading doesn't show as people leaving.
+- **Ventilation power** is the summed reached airflow times 13.5 kW per m³/s:
+  1.5 for the fans and 12 for heating outdoor air from 8 to 18 °C. These are
+  the energy proxy's constants (NFR-3) and the two parts of it that follow
+  from the airflow alone. The radiators are left out: their power depends on
+  the room's true temperature, which the dashboard never sees. "Every room at
+  design flow" is what the `constant` policy would use.
+- **Colours.** Blue is what was measured or reached, orange what the
+  controller expected or commanded, in every graph. Limits are dashed grey
+  lines with their label on the line. Yellow and red mean an alert and
+  nothing else, and always come with an icon and a word. The two series
+  colours were checked for colour-blind separation in light and dark mode
+  (worst pair ΔE 24.7 and 26.8, against a target of 8).
+- **History** is held in memory, 7 model days per room. **After a restart**
+  `viz` reads the run's readings and decisions so far from storage (IF-10) in
+  the background. The airflow reached before the restart and the alert log
+  are not in storage and start again from now. Without storage the graphs
+  start empty.
+- **On failure:** if the page can't reach `viz` it keeps the last picture,
+  dimmed, and says so. If the model clock is moved back by more than half an
+  hour, the history is dropped with the rest of the old picture.
 
 ## IF-12. Device registry
 

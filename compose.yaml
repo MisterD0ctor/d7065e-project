@@ -134,10 +134,14 @@ services:
     environment:
       BUILDSIM_URL: http://buildsim:9090
       REGISTRY_URL: http://registry:8080
+      STORAGE_URL: http://storage:8080   # the graphs' history after a restart
+      RUN_ID: ${RUN_ID:-dev}
       MQTT_URL: tcp://mosquitto:1883
       MQTT_USER: viz
       MQTT_PASS: viz-pw
-    depends_on: [mosquitto, registry]
+    ports:
+      - "127.0.0.1:8060:8080"   # the page with the graphs
+    depends_on: [mosquitto, registry, storage]
     restart: unless-stopped
 
   # Offline training (D-5): not part of `up`. Run it after recording runs:

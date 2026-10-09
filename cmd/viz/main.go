@@ -1,6 +1,8 @@
 // Command viz is the dashboard (D-8, FR-10). It follows the observations,
-// decisions and actuator events on MQTT and shows the building in the BuildSim
-// viewer: a heatmap layer per measure and the current alerts (IF-11).
+// decisions and actuator events on MQTT and shows the building in two places
+// (IF-11). In the BuildSim viewer: a heatmap layer per measure and the
+// current alerts. On its own web page: graphs of each room and of the whole
+// building over time, which the viewer has no place for.
 //
 // It is the only writer of room layers and alerts: BuildSim keeps one
 // collection of each, and a second writer would erase the first. The viewer
@@ -13,6 +15,7 @@ import (
 	"log"
 	"os/signal"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -25,6 +28,7 @@ import (
 	"github.com/MisterD0ctor/d7065e-project/internal/msg"
 	"github.com/MisterD0ctor/d7065e-project/internal/registry"
 	"github.com/MisterD0ctor/d7065e-project/internal/rooms"
+	"github.com/MisterD0ctor/d7065e-project/internal/sizing"
 )
 
 const (
@@ -42,8 +46,8 @@ type viz struct {
 	bs    *buildsim.Client
 	reg   *devreg.Client
 
-	mu      sync.Mutex
-	maxFlow map[rooms.Key]float64 // each room's maximum airflow, l/s
+	mu     sync.Mutex
+	levels map[string]bool // the floors that have rooms, to read their equipment
 
 	lastAlerts   string    // JSON of the alerts last sent
 	alertsSentAt time.Time // real time
@@ -55,12 +59,13 @@ func main() {
 	defer stop()
 
 	v := &viz{
-		board:   dashboard.New(),
-		bs:      buildsim.New(env.String("BUILDSIM_URL", "http://buildsim:9090")),
-		reg:     devreg.New(env.String("REGISTRY_URL", "http://registry:8080")),
-		maxFlow: map[rooms.Key]float64{},
+		board:  dashboard.New(),
+		bs:     buildsim.New(env.String("BUILDSIM_URL", "http://buildsim:9090")),
+		reg:    devreg.New(env.String("REGISTRY_URL", "http://registry:8080")),
+		levels: map[string]bool{},
 	}
 	v.refreshRooms(ctx)
+	go v.serve(ctx, ":"+env.String("PORT", "8080"))
 
 	mq := mqttx.Connect("viz")
 	mq.Subscribe("obs/#", func(_ string, p []byte) {
@@ -81,6 +86,11 @@ func main() {
 			v.board.Event(e)
 		}
 	})
+	// The graphs' past, from storage: after a restart they continue where
+	// they were instead of starting empty.
+	if storage := strings.TrimRight(env.String("STORAGE_URL", ""), "/"); storage != "" {
+		go v.backfill(ctx, storage, env.String("RUN_ID", "dev"))
+	}
 
 	publish := time.NewTicker(PublishEvery)
 	defer publish.Stop()
@@ -98,50 +108,52 @@ func main() {
 	}
 }
 
-// refreshRooms learns each room's maximum airflow from the registry, to show
-// airflow as a share of it: an office's 20 l/s and a lecture room's 900 l/s
-// would not fit one colour scale. On an error the last known list is kept.
+// refreshRooms learns each room's sizing from the registry. The airflow is
+// shown as a share of the room's maximum: an office's 20 l/s and a lecture
+// room's 900 l/s would not fit one colour scale. On an error the last known
+// list is kept.
 func (v *viz) refreshRooms(ctx context.Context) {
 	devs, err := v.reg.List(ctx, registry.Filter{Kind: rooms.Damper, Status: "active"})
 	if err != nil {
-		log.Printf("registry: %v (keeping %d known rooms)", err, len(v.maxFlow))
+		log.Printf("registry: %v (keeping the known rooms)", err)
 		return
 	}
-	maxFlow := map[rooms.Key]float64{}
+	sizes := map[rooms.Key]sizing.Room{}
+	levels := map[string]bool{}
 	for _, d := range devs {
 		if k, err := rooms.Parse(d.Room); err == nil && d.Size.Max > 0 {
-			maxFlow[k] = d.Size.Max
+			sizes[k] = d.Size
+			levels[k.Level] = true
 		}
 	}
+	v.board.SetRooms(sizes)
 	v.mu.Lock()
-	v.maxFlow = maxFlow
+	v.levels = levels
 	v.mu.Unlock()
 }
 
-// airflow reads what each room's damper has reached from BuildSim, where the
-// dampers report it, as a percentage of the room's maximum.
+// airflow reads what each room's damper has reached, in l/s, from BuildSim,
+// where the dampers report it. It returns nil if nothing could be read.
 func (v *viz) airflow(ctx context.Context) map[rooms.Key]float64 {
 	v.mu.Lock()
-	maxFlow := v.maxFlow
+	levels := v.levels
 	v.mu.Unlock()
-	levels := map[string]bool{}
-	for k := range maxFlow {
-		levels[k.Level] = true
-	}
 	fan := rooms.Actuators[rooms.Damper].EquipmentType
-	out := map[rooms.Key]float64{}
+	var out map[rooms.Key]float64
 	for level := range levels {
 		eq, err := v.bs.Equipment(ctx, level)
 		if err != nil {
-			continue // the layer is left out this round
+			continue // this floor is left out this round
+		}
+		if out == nil {
+			out = map[rooms.Key]float64{}
 		}
 		for _, e := range eq {
-			k := rooms.Key{Level: e.Level, Name: e.Room}
-			if e.Type != fan || len(e.Actuators) == 0 || maxFlow[k] == 0 {
+			if e.Type != fan || len(e.Actuators) == 0 {
 				continue
 			}
 			if flow, err := strconv.ParseFloat(e.Actuators[0].State, 64); err == nil {
-				out[k] = 100 * flow / maxFlow[k]
+				out[rooms.Key{Level: e.Level, Name: e.Room}] = flow
 			}
 		}
 	}
@@ -149,7 +161,9 @@ func (v *viz) airflow(ctx context.Context) map[rooms.Key]float64 {
 }
 
 func (v *viz) publish(ctx context.Context) {
-	err := v.bs.PutRoomLayers(ctx, v.board.Layers(v.airflow(ctx)))
+	// The history and the alert log move on whether or not BuildSim answers.
+	v.board.Tick(v.airflow(ctx))
+	err := v.bs.PutRoomLayers(ctx, v.board.Layers())
 	if err == nil {
 		alerts := v.board.Alerts()
 		body, _ := json.Marshal(alerts)

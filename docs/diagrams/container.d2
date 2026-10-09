@@ -6,6 +6,9 @@ vars: {
 
 direction: down
 
+manager: "Facility manager\n[Person]\nWatches the building" {
+  shape: person
+}
 bs: "BuildSim\n[Software System, from course]\nShared state: sensor values,\nactuator state, 3D viewer"
 occ: "occupancysim\n[Software System, course example, modified]\nPeople and the model clock" {
   style.stroke-dash: 4
@@ -32,7 +35,7 @@ sys: "Ventilation Control  [System]" {
     shape: cylinder
   }
   train: "train\n[Batch job: Go]\nPer-room occupancy profile"
-  viz: "viz\n[Container: Go]\nDashboard: the only writer of\nroom layers and alerts"
+  viz: "viz\n[Container: Go]\nDashboard: layers and alerts in the\nviewer; its own page with graphs"
 }
 
 installer -> sys.registry: "Registers id, kind, room [REST / web form]"
@@ -57,4 +60,7 @@ sys.storage -> sys.controller: "Latest model [REST]"
 sys.train <-> sys.storage: "History in, model out [REST]"
 sys.broker -> sys.viz: "obs, decisions, events [MQTT]"
 sys.viz -> bs: "Room layers, alerts; reads the dampers' state [REST]"
+sys.viz -> sys.storage: "The run so far, after a restart [REST]"
+manager -> sys.viz: "Graphs over time [web page]"
+manager -> bs: "3D view, alerts [web page]"
 sys.viz -> sys.registry: "Each room's maximum flow [REST]"
