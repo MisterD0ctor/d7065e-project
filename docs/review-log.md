@@ -21,6 +21,14 @@ stuck sensor is then treated exactly like a missing one.
 | The live test's records went to the wrong run. `.env` still named an old run (`smoke-predictive`), the stack had been started with `RUN_ID=viz-dev` on the command line, and every `docker compose up -d <service>` without it recreated that service under the `.env` run id, physics included | The decisions with the fault text were missing from `viz-dev` in storage | `deploy/fault.sh` injects a fault with the run id read from the running controller and touches only the sensor. The stray records (model date 2026-09-21) are still in `smoke-predictive`, a development run no result uses; the evaluation runs were not touched |
 | Does the detector change the evaluation? | `cmd/evaluate -stuck-check`: the four final runs replayed through it | No verdict in 1.44 million CO₂ readings, 1.44 million temperature readings and 1.44 million counter checks, so not one decision would have differed (T-38) |
 
+The live tests were then repeated as one scripted run of their own,
+`fault-tests` (`deploy/fault-tests.sh`, T-12, T-13, T-36), so that the
+evidence is not in a development run: each fault goes in at a fixed model
+time with the clock paused, on a day occupancysim always generates the same.
+All four behaved as in the first tries. The stuck CO₂ sensor is the telling
+one: it said 425 ppm for 50 minutes while up to 12 people were in the room,
+the damper was held at design flow, and the true CO₂ peaked at 571 ppm.
+
 AI advice that was wrong here:
 - The detector first proposed, in the entry below, was "a count that has not
   changed in N minutes while CO₂ moves". That blames every healthy counter:

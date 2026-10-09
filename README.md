@@ -86,7 +86,12 @@ and don't restart containers while it runs.
 readings through the stuck-sensor detector (FR-7): in a run without injected
 faults every verdict would be a false alarm.
 
-Inject faults with `deploy/fault.sh`, not with a bare
+`deploy/fault-tests.sh fault-tests` runs the sensor-fault tests (T-12, T-13,
+T-36) as one run of a simulated Monday morning, about ten minutes: a stuck
+temperature sensor, a silent and a stuck CO₂ sensor, and a counter stuck
+during a lecture. It restarts the whole stack under the run id it is given.
+
+Inject single faults with `deploy/fault.sh`, not with a bare
 `FAULT_CO2_0001=stuck docker compose up -d co2-0001`. Compose takes `RUN_ID`
 from `.env` unless it is given, so in a stack started under another run id
 the bare command files the sensor's readings under the wrong run and

@@ -463,9 +463,8 @@ and CO₂ only (`degraded_occupancy`). The decision says what was found
 
 **Limits, measured** (T-12, T-36 to T-38):
 - A counter is found only after the room's air has had time to disagree:
-  15 to 20 minutes after a lecture room empties (15 live, 22 in the unit
-  test's larger room), about 75 for an office (small room, small flow, slow
-  air).
+  15 to 20 minutes after a lecture room empties (15 live in two rooms, 22 in
+  the unit test), about 75 for an office (small room, small flow, slow air).
 - A counter stuck on a number whose CO₂ would be lost in the sensor noise
   even at full flow is not found: roughly fewer people than a quarter of the
   room's capacity. Seen live: a counter stuck at 4 in a 25-person room was
