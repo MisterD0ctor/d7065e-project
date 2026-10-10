@@ -1,0 +1,62 @@
+# State machine of one damper actuator (cmd/actuator, internal/actuator).
+# The radiator valve is the same without the override state; its fallback is
+# 21 °C. The second machine is where the device gets its inputs from.
+vars: {
+  d2-config: {
+    layout-engine: elk
+  }
+}
+
+direction: down
+grid-columns: 1
+
+(** -> **)[*].style.font-size: 19
+
+classes: {
+  state: {
+    style: {fill: "#DCEBFA"; stroke: "#2E6295"; border-radius: 12; font-size: 20}
+  }
+  bad: {
+    style: {fill: "#F6E0B5"; stroke: "#9A6B00"; border-radius: 12; font-size: 20}
+  }
+  dot: {
+    shape: circle
+    width: 26
+    height: 26
+    style: {fill: "#333333"; stroke: "#333333"}
+  }
+}
+
+life: "Command state" {
+  style: {stroke-dash: 4; fill: transparent; font-size: 22}
+
+  start: "" {class: dot}
+  uncommissioned: "Uncommissioned\nNo commands accepted,\nnothing written" {class: state}
+  refused: "Refused to start\n(process exits)" {class: bad}
+  fallback: "Fallback\nDesign flow" {class: bad}
+  following: "Following a command\nTravels at most 10 % of maximum\nper model minute; flow floor applied" {class: state}
+  override: "CO₂ override\nMaximum flow, whatever\nthe command says" {class: bad}
+
+  start -> uncommissioned
+  uncommissioned -> uncommissioned: "registry answers 404:\ncheck in again in 5 s"
+  uncommissioned -> refused: "registered as\nanother kind"
+  uncommissioned -> fallback: "registry answers 200:\nroom and sizing known"
+  fallback -> following: "valid command: 202"
+  following -> following: "new command; duplicate cmd_id: 200;\nexpired: 409; out of range: 422"
+  following -> fallback: "no valid command for 300 model-s:\nevent ttl_expired"
+  following -> override: "CO₂ reading > 1100 ppm:\nevent override_co2"
+  fallback -> override: "CO₂ reading > 1100 ppm"
+  override -> following: "CO₂ ≤ 1100 ppm, command\nstill valid: override_released"
+  override -> fallback: "CO₂ ≤ 1100 ppm,\ncommand expired"
+}
+
+inputs: "Where the inputs come from" {
+  direction: right
+  style: {stroke-dash: 4; fill: transparent; font-size: 22}
+
+  mqtt: "MQTT\nModel time from time/model,\nCO₂ from obs/…/co2" {class: state}
+  rest: "REST fallback\nModel time from occupancysim,\nCO₂ reading from BuildSim" {class: bad}
+
+  mqtt -> rest: "silent for 2.5 × the usual gap\n(at least 1.5 s real)"
+  rest -> mqtt: "a message arrives"
+}

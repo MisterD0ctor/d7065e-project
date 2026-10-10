@@ -1,0 +1,169 @@
+\section{6. Simulating the sensor values (the physical model)}
+
+BuildSim provides rooms but not their physics, so three things are simulated:
+the people, the air in each room, and the devices that measure it.
+
+\subsection{6.1 The people}
+
+occupancysim builds each person's day from a seed and the date. Staff arrive
+between 08:00 and 10:00, work in their own office, take fika around 09:45 and
+14:30 with a probability of 70~\%, lunch between 12:00 and 13:00, and leave
+between 16:00 and 19:00. Students attend one to three lectures in the slots
+starting 08:15, 10:15, 13:15 and 15:15. Weekends are nearly empty, and three
+guards patrol at night. A room's role follows from its area: an office holds
+one person, a lecture room one per 2~m², a fika room one per 4~m².
+
+One property of this model decides what a forecast can achieve. For each
+lecture slot, occupancysim draws the floor's lecture rooms in random order and
+books only as many as the students need. A given lecture room is therefore
+usually empty and occasionally full, at times that do not repeat from day to
+day. The fika rooms and the offices have a daily pattern; the lecture rooms do
+not.
+
+We changed occupancysim in two places. It now advances in fixed 5-second steps
+where it used to step by whatever the wall clock gave it, and it records how
+many people, and how many guards among them, are in every room at every whole
+model minute (\code{GET /api/minutes}, IF-1). Before this, two runs of one day
+saw the same plan through differently phased windows and disagreed in 0.3~\%
+of samples. The day plans and everything occupancysim writes to BuildSim are
+unchanged, and its own tests pass.
+
+\subsection{6.2 The air in a room}
+
+Each room is one well-mixed volume $V$ with $n$ people, an airflow $q$ and a
+heating setpoint. The airflow and the setpoint are the states the room's damper
+and radiator valve have \emph{reached}, which physics reads from BuildSim every
+tick. This is where the loop closes: a command changes the reached state, the
+reached state changes the next minute of physics, and the next reading shows
+it.
+
+\textbf{\COtwo{}} is a mass balance, with $C$ in ppm:
+\[
+V\,\frac{dC}{dt} = n\,G\cdot 10^{6} + q\,(C_{\mathrm{out}} - C),
+\qquad
+C_{\infty} = C_{\mathrm{out}} + \frac{n\,G\cdot 10^{6}}{q},
+\qquad
+\tau = \frac{V}{q}.
+\]
+People add \COtwo{} at $G$ per person; ventilation replaces room air with
+outdoor air. Left alone, the room approaches $C_{\infty}$ with time constant
+$\tau$.
+
+\textbf{Temperature} is a heat balance over the room's thermal mass
+$C_{\mathrm{th}}$:
+\[
+C_{\mathrm{th}}\,\frac{dT}{dt} = UA\,(T_{\mathrm{out}} - T)
+ + \rho c_p\,q\,(T_{\mathrm{sup}} - T) + n\,P_{\mathrm{body}} + P_{\mathrm{rad}},
+\qquad
+P_{\mathrm{rad}} = P_{\max}\cdot\mathrm{clamp}\!\left(\frac{T_{\mathrm{set}} - T}{0.5\ \mathrm{K}},\,0,\,1\right).
+\]
+The terms are loss through the envelope, supply air arriving at
+$T_{\mathrm{sup}}$, body heat, and the radiator, whose valve opens in
+proportion to how far the room is below its setpoint.
+
+Both equations are linear with the inputs held constant, so each step uses the
+exact solution, $x(t+\Delta t) = x_{\infty} + (x(t) - x_{\infty})\,e^{-\Delta
+t/\tau}$, and is stable for any step. Physics advances one model minute at a
+time, with the people who were in the room at the start of the minute; a longer
+gap, such as a clock jump, is cut into steps of at most one minute (FR-1).
+Because the steps follow occupancysim's per-minute record and not physics' own
+timing, the true state is the same function of model time in every run of a
+day.
+
+\begin{longtable}[]{@{}L{0.30\linewidth}L{0.22\linewidth}L{0.40\linewidth}@{}}
+\toprule
+\textbf{Constant} & \textbf{Value} & \textbf{Source or assumption} \\
+\midrule
+\endhead
+Ceiling height & 2.7 m & Assumed; $V$ = floor area × height \\
+Outdoor \COtwo{}, $C_{\mathrm{out}}$ & 420 ppm & \\
+\COtwo{} per seated adult, $G$ & $5\cdot10^{-6}$ m³/s & About 18 l/h \\
+Outdoor temperature, $T_{\mathrm{out}}$ & 8 °C & Luleå in autumn; constant \\
+Supply air, $T_{\mathrm{sup}}$ & 18 °C & The air-handling unit heats outdoor air to this \\
+Envelope loss, $UA$ & 1 W/K per m² floor & Assumed \\
+Thermal mass, $C_{\mathrm{th}}$ & 100 kJ/K per m² floor & Air, furniture and inner walls; assumed \\
+Body heat, $P_{\mathrm{body}}$ & 100 W per person & Seated adult \\
+Radiator maximum, $P_{\max}$ & 60 W per m² floor & Assumed \\
+Air, $\rho c_p$ & 1200 J/(m³·K) & \\
+\bottomrule
+\end{longtable}
+
+\textbf{Energy proxy} (NFR-3). Physics reports three powers per room and
+minute, and the evaluation sums them: fan power at 1.5~kW per m³/s of airflow
+(a typical specific fan power), the heat needed to warm outdoor air to the
+supply temperature, $\rho c_p\,q\,(T_{\mathrm{sup}} - T_{\mathrm{out}})$, which
+is 12~kW per m³/s, and the radiator power from the heat balance.
+
+\subsection{6.3 Ventilation sizing}
+
+Each room's flows follow from its area and its design capacity, by the Swedish
+workplace rule (AFS: 7~l/s per person plus 0.35~l/s per m²):
+\[
+q_{\mathrm{design}} = 7\ \mathrm{l/s}\times\text{capacity} + 0.35\ \mathrm{l/s\,m^2}\times\text{area}.
+\]
+
+\begin{longtable}[]{@{}L{0.22\linewidth}L{0.24\linewidth}L{0.46\linewidth}@{}}
+\toprule
+\textbf{Flow level} & \textbf{Value} & \textbf{Used for} \\
+\midrule
+\endhead
+Maximum & 1.5 × $q_{\mathrm{design}}$ & The \COtwo{} override; the top of the damper's range \\
+Design & $q_{\mathrm{design}}$ & The \code{constant} policy; the damper's fallback; degraded mode without \COtwo{} \\
+Occupied minimum & 0.35 l/s per m² & Flow floor on weekdays 07--18 \\
+Unoccupied minimum & 0.10 l/s per m² & Flow floor otherwise (building code, nobody present) \\
+\bottomrule
+\end{longtable}
+
+The 50 rooms, as sized in the registry:
+
+\begin{longtable}[]{@{}L{0.10\linewidth}L{0.07\linewidth}L{0.12\linewidth}L{0.11\linewidth}L{0.14\linewidth}L{0.12\linewidth}L{0.16\linewidth}@{}}
+\toprule
+\textbf{Role} & \textbf{Rooms} & \textbf{Area, m²} & \textbf{Capacity} & \textbf{Design flow, l/s} & \textbf{$\tau$ at design} & \textbf{\COtwo{} when full, at design} \\
+\midrule
+\endhead
+Lecture & 20 & 63--237 & 31--119 & 239--916 & 12 min & about 1070 ppm \\
+Fika & 3 & 100--214 & 25--53 & 210--446 & 21--22 min & about 1010 ppm \\
+Office & 24 & 6--27 & 1 & 9--17 & 31--74 min & about 790 ppm \\
+Unused & 3 & 8--26 & 1 & 10--16 & 38--73 min & \\
+\bottomrule
+\end{longtable}
+
+Two things follow from the table. A full room at design flow settles right
+around the 1000~ppm limit, which is why the maximum sits above design. And at
+the occupied minimum every room has a time constant of about two hours
+($2.7\ \mathrm{m} / 0.35\ \mathrm{l/s\,m^2}$), so a room that fills while its
+damper sits at the floor is far behind. That is the lag a forecast is meant to
+beat.
+
+\subsection{6.4 The sensors and their faults}
+
+Each sensor device samples its own room's truth from physics once per model
+minute and reports what a sensor of its kind would:
+
+\begin{longtable}[]{@{}L{0.16\linewidth}L{0.40\linewidth}L{0.36\linewidth}@{}}
+\toprule
+\textbf{Sensor} & \textbf{Noise} & \textbf{Reported as} \\
+\midrule
+\endhead
+\COtwo{} & Gaussian with a standard deviation of half of (30~ppm + 3~\% of the value), so 95~\% of readings are within ±(30~ppm + 3~\%) & Whole ppm \\
+Temperature & Gaussian, standard deviation 0.15~°C & Tenths of a degree \\
+People counter & One too many in 5~\% of readings, one too few in 5~\% (never below zero) & A whole number, guards included \\
+\bottomrule
+\end{longtable}
+
+Three faults can be set on one device (\code{deploy/fault.sh co2-0001 stuck}):
+\emph{stuck} repeats the last good reading, \emph{dropout} reports nothing, and
+\emph{drift} adds a rate per hour. A faulty reading is not marked in any way.
+
+\subsection{6.5 What the model leaves out}
+
+The model has the structure the control problem needs: people drive \COtwo{}
+and heat, actuators answer with a lag, and the day has a shape. It is not a
+building simulation. Each room is one well-mixed zone with no air or heat
+exchanged with its neighbours or the corridor. The outdoor temperature and
+\COtwo{} are constant, and there is no sun and no equipment load. Fan power is
+taken as proportional to airflow, where a real fan's falls faster than that
+when it slows down, so the proxy understates what low flows save. The thermal
+constants are assumed, not fitted to any building. The policies in Section 11
+are therefore compared against a model we wrote ourselves, and the result says
+as much about that model's time constants as about the controllers.

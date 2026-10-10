@@ -1,0 +1,28 @@
+# C4 dynamic diagram: one control period in fika room level0/1570 under the
+# predictive policy, at model time 09:28, about 20 minutes before the morning
+# break. Numbers from the smoke test of 2026-09-30 (docs/review-log.md).
+shape: sequence_diagram
+
+(* -> *)[*].style.font-size: 19
+
+occ: "occupancysim" {style.font-size: 20}
+phys: "physics" {style.font-size: 20}
+co2: "CO₂ sensor\nco2-0002" {style.font-size: 20}
+mq: "mosquitto" {style.font-size: 20}
+ctrl: "controller" {style.font-size: 20}
+dmp: "damper\ndamper-0002" {style.font-size: 20}
+bs: "BuildSim" {style.font-size: 20}
+
+occ -> phys: "1: 09:28,\nroom empty"
+phys -> co2: "2: truth\n417 ppm"
+co2 -> bs: "3: PUT reading \"417\""
+co2 -> mq: "4: obs/…/co2"
+mq -> ctrl: "5: observation"
+ctrl -> ctrl: "6: 11 people\nexpected within\n22 min: 112 l/s"
+ctrl -> dmp: "7: POST 112.4 l/s,\ncmd_id, TTL 300 s"
+dmp -> ctrl: "8: 202, target\n112.4 l/s"
+ctrl -> mq: "9: decision/…"
+dmp -> bs: "10: PUT reached\nstate, +31.6 l/s\nper minute at most"
+bs -> phys: "11: reached airflow"
+phys -> phys: "12: next minute,\nnew airflow"
+phys -> co2: "13: truth\nat 09:29"

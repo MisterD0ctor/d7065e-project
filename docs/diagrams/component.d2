@@ -1,0 +1,60 @@
+# C4 Level 3: the components inside the controller container (cmd/controller
+# and the packages it uses). Arrows point the way the data flows.
+vars: {
+  d2-config: {
+    layout-engine: elk
+  }
+}
+
+direction: down
+
+(** -> **)[*].style.font-size: 19
+
+classes: {
+  component: {
+    style: {fill: "#85BBF0"; stroke: "#5D82A8"; font-color: "#000000"; font-size: 20}
+  }
+  container: {
+    style: {fill: "#438DD5"; stroke: "#2E6295"; font-color: "#ffffff"; font-size: 20}
+  }
+  external: {
+    style: {fill: "#8C8C8C"; stroke: "#6E6E6E"; font-color: "#ffffff"; font-size: 20}
+  }
+}
+
+broker: "mosquitto\n[Container]" {class: container}
+bs: "BuildSim\n[External]" {class: external}
+registry: "registry\n[Container]" {class: container}
+storage: "storage\n[Container]" {class: container}
+actuators: "Actuator devices\n[Containers]" {class: container}
+
+ctrl: "controller [Container: Go]" {
+  style: {stroke-dash: 4; fill: transparent; font-size: 22}
+
+  intake: "Observation intake\n[onObservation, pollIfSilent]\nDrops duplicates and readings older\nthan 180 model-s; polls BuildSim\nwhen MQTT is silent" {class: component}
+  plant: "Plant map\n[refreshPlants]\nRooms, sizing and actuator\nendpoints, re-read every 30 s" {class: component}
+  stuck: "Stuck-sensor detector\n[internal/stuck]\nRepeated readings; the counter\nagainst two CO₂ bounds" {class: component}
+  forecast: "Forecast\n[internal/predict; oracle replay]\nPeople expected within\nthe room's lead time" {class: component}
+  policy: "Ventilation policy\n[policy.go]\nconstant, reactive,\npredictive, oracle" {class: component}
+  heating: "Heating schedule\n[heating.go]\nSetback and optimal start;\nthe same for every policy" {class: component}
+  commander: "Commander\n[act, command]\nOne command per reading: cmd_id,\nissued_at, TTL; retries; decision record" {class: component}
+}
+
+broker -> ctrl.intake: "obs/# [MQTT]"
+bs -> ctrl.intake: "readings, fallback\n[REST]" {style.stroke-dash: 3}
+registry -> ctrl.plant: "devices [REST]"
+storage -> ctrl.forecast: "model every 5 min;\nrecorded run [REST]"
+
+ctrl.intake -> ctrl.stuck: "every reading"
+ctrl.intake -> ctrl.policy: "CO₂, people count"
+ctrl.intake -> ctrl.heating: "temperature"
+ctrl.stuck -> ctrl.policy: "CO₂ sensor or\ncounter stuck"
+ctrl.stuck -> ctrl.heating: "sensor stuck"
+ctrl.forecast -> ctrl.policy: "people expected"
+ctrl.plant -> ctrl.policy: "room sizing"
+ctrl.plant -> ctrl.commander: "endpoint"
+ctrl.policy -> ctrl.commander: "airflow, mode"
+ctrl.heating -> ctrl.commander: "setpoint, reason"
+
+ctrl.commander -> actuators: "POST command [REST]"
+ctrl.commander -> broker: "decision/# [MQTT]"

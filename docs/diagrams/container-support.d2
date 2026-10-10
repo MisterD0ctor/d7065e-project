@@ -1,0 +1,66 @@
+# C4 Level 2, view 2 of 2: commissioning (the registry, D-10) and the
+# dashboard (viz, D-8). The control loop is in container.d2.
+# Arrows point the way the data flows; a two-way arrow says which way each
+# part goes.
+vars: {
+  d2-config: {
+    layout-engine: elk
+  }
+}
+
+direction: down
+
+(** -> **)[*].style.font-size: 19
+(** <-> **)[*].style.font-size: 19
+
+classes: {
+  person: {
+    shape: person
+    style: {fill: "#08427B"; stroke: "#073B6F"; font-size: 20}
+  }
+  container: {
+    style: {fill: "#438DD5"; stroke: "#2E6295"; font-color: "#ffffff"; font-size: 20}
+  }
+  store: {
+    shape: cylinder
+    style: {fill: "#438DD5"; stroke: "#2E6295"; font-color: "#ffffff"; font-size: 20}
+  }
+  external: {
+    style: {fill: "#8C8C8C"; stroke: "#6E6E6E"; font-color: "#ffffff"; font-size: 20}
+  }
+}
+
+installer: "Installer\n[Person]" {
+  class: person
+  label.near: outside-top-center
+}
+manager: "Facility manager\n[Person]" {class: person}
+occ: "occupancysim\n[External]" {class: external}
+bs: "BuildSim\n[External]\nState and 3D viewer" {class: external}
+
+sys: "Ventilation Control [System]" {
+  style: {stroke-dash: 4; fill: transparent; font-size: 22}
+
+  registry: "registry\n[Container: Go + SQLite]\nOne record per device: id, kind,\nroom, sizing, endpoint, last seen" {class: store}
+  devices: "Sensor and actuator devices\n[One container each]" {class: container}
+  controller: "controller\n[Container]" {class: container}
+  broker: "mosquitto\n[Container]" {
+    shape: queue
+    style: {fill: "#438DD5"; stroke: "#2E6295"; font-color: "#ffffff"; font-size: 20}
+  }
+  storage: "storage\n[Container]" {class: store}
+  viz: "viz\n[Container: Go, web page]\nDashboard: room layers,\nalerts, graphs over time" {class: container}
+}
+
+installer -> sys.registry: "devices\n[web form]"
+occ -> sys.registry: "capacities\n[REST]"
+sys.registry <-> bs: "equipment out;\nfloor plan in [REST]"
+sys.registry <-> sys.devices: "check-in in;\nroom, sizing\nout [REST]"
+sys.registry -> sys.controller: "rooms,\nendpoints\n[REST]"
+sys.registry -> sys.viz: "room sizing [REST]"
+
+sys.broker -> sys.viz: "obs, decision,\nevent [MQTT]"
+sys.storage -> sys.viz: "the run so far,\nat start [REST]"
+sys.viz <-> bs: "layers, alerts out;\ndamper states in [REST]"
+sys.viz -> manager: "graphs, alerts\n[web page]"
+bs -> manager: "3D view\n[web viewer]"

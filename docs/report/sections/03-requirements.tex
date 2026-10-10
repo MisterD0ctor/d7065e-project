@@ -1,0 +1,100 @@
+\section{3. Requirements}
+
+Each requirement has an ID, a priority (M~must, S~should, C~could), a criterion
+that can be measured, and the tests of Section 10 that verify it. The design
+decisions in Section 4.4 cite these IDs, and Section 10 says for each one
+whether it was met. All times are model time.
+
+\todo{The priorities are a proposal. Decide them together.}
+
+\subsection{Functional}
+
+\begin{longtable}[]{@{}L{0.07\linewidth}L{0.04\linewidth}L{0.66\linewidth}L{0.13\linewidth}@{}}
+\toprule
+\textbf{ID} & \textbf{Pri} & \textbf{Requirement and acceptance criterion} & \textbf{Verified by} \\
+\midrule
+\endhead
+FR-1 & M & Physics simulates \COtwo{} (mass balance) and temperature (heat
+balance) per room, driven by the true occupancy and by the airflow and setpoint
+the actuators have reached. A step response matches the analytic time constant
+within 5~\%; a clock jump of hours gives no overshoot. & T-01, T-02 \\
+FR-2 & M & Each room has a \COtwo{} sensor, a temperature sensor and a people
+counter. Each samples its room every 60~s and reports with noise: \COtwo{}
+±(30~ppm + 3~\%), temperature ±0.3~°C, count ±1. A fault (stuck, dropout,
+drift) can be injected into one sensor without touching the others. & T-03, T-04 \\
+FR-3 & M & The controller sets the airflow and the heating setpoint of every
+room once per control period (60~s), and the next readings reflect it: the loop
+closes. & T-05 \\
+FR-4 & M & The controller forecasts each room's occupancy one lead time ahead
+(the room's \COtwo{} time constant, 10--30~min) from a model trained offline on
+stored sensor readings. On held-out days its error is lower than that of ``same
+as now''. & T-06, T-35 \\
+FR-5 & M & An actuator validates every command before applying it: range,
+unit, time to live, duplicates (idempotent on \code{cmd\_id}). It rejects an
+invalid command with a reason and moves towards an accepted target at a fixed
+rate. & T-07, T-08 \\
+FR-6 & M & Safety, enforced in the damper independently of the controller:
+\COtwo{} above 1100~ppm gives maximum airflow whatever the command says, and
+the flow never drops below 0.35~l/s·m² in occupied hours or 0.10~l/s·m²
+otherwise. & T-09, T-10, T-11 \\
+FR-7 & S & Degraded mode. A sensor that is silent for more than 3 samples, or
+stuck on one value, is not acted on: a bad \COtwo{} sensor means design flow, a
+bad temperature sensor 21~°C, a bad counter means the forecast and \COtwo{}
+only. A stuck \COtwo{} sensor is found within 5 samples, a stuck temperature
+sensor within 12, a stuck counter once the room's \COtwo{} contradicts it. The
+decision names the mode and the fault. & T-12, T-13, T-36 to T-38 \\
+FR-8 & M & Every observation, true room state, decision and actuator event is
+stored with its model time and a run id, and a run's stored records are enough
+to rebuild its results. & T-14 \\
+FR-9 & M & The policy is chosen by one setting: \code{constant},
+\code{reactive}, \code{predictive} or \code{oracle}. Nothing else differs
+between two evaluation runs. & T-15, T-32 \\
+FR-10 & S & The dashboard shows, per room, measured \COtwo{}, people counted
+and expected, airflow and temperature, with alerts for overrides, silent or
+stuck sensors and actuators on fallback: now, in the BuildSim viewer, and over
+time, up to a week back, on our own page. & T-16, T-39 \\
+FR-11 & S & A device does nothing until an installer has registered its id,
+kind and room. The registry rejects a room that is not in the floor plan, and
+keeps BuildSim's equipment list in step with what is installed, also after a
+BuildSim restart. & T-17, T-28 to T-31 \\
+\bottomrule
+\end{longtable}
+
+\subsection{Non-functional}
+
+\begin{longtable}[]{@{}L{0.07\linewidth}L{0.04\linewidth}L{0.66\linewidth}L{0.13\linewidth}@{}}
+\toprule
+\textbf{ID} & \textbf{Pri} & \textbf{Requirement and acceptance criterion} & \textbf{Verified by} \\
+\midrule
+\endhead
+NFR-1 & M & \textbf{Air quality.} \COtwo{} is at or below 1000~ppm in at least
+95~\% of occupied room-minutes over five simulated weekdays
+(\code{predictive}). & T-18 \\
+NFR-2 & M & \textbf{Comfort.} The temperature is within 20--24~°C in at least
+95~\% of occupied room-minutes. & T-19 \\
+NFR-3 & S & \textbf{Energy.} The energy proxy (fans, heating of supply air,
+radiators) of \code{predictive} is at least 30~\% below \code{constant}, and
+no higher than \code{reactive} while meeting NFR-1 better than
+\code{reactive} does. & T-20 \\
+NFR-4 & S & \textbf{Latency.} A command shows up in BuildSim within one
+control period (60~s, which is 1~s real at factor 60); reported as the 95th
+percentile. & T-21 \\
+NFR-5 & S & \textbf{Scale.} With 50 rooms (150 sensor writes per sample,
+which is 150 per real second at factor 60), a full sample cycle finishes
+within one sample period. & T-22 \\
+NFR-6 & M & \textbf{Robustness.} Any one of our containers can be killed and
+restarted without an unsafe state: a damper without valid commands returns to
+design flow, and the loop resumes within 30~s real. & T-13, T-17, T-23, T-24 \\
+NFR-7 & M & \textbf{Reproducibility.} The same seed and date give the same
+occupancy in every room at every minute, and every number in this report
+traces to a run id. & T-25 \\
+NFR-8 & C & \textbf{Evaluation cost.} One policy over five simulated weekdays
+runs in at most 2.5~h real. & T-26 \\
+\bottomrule
+\end{longtable}
+
+Where the numbers come from. 1000~ppm is the usual indoor-air guideline. The
+band 20--24~°C is the heating-season comfort range of EN~16798-1 category~II.
+The airflows come from the Swedish workplace rule and the building code
+(Section 6). NFR-3 is relative on purpose: the proposal treated the gap between
+reactive control and the oracle as a result to report, not as a target.

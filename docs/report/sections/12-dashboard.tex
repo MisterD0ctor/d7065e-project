@@ -1,0 +1,96 @@
+\section{12. Dashboard}
+
+The dashboard is one process, \code{viz}, with two faces. It builds both from
+what the control system itself sees: the observations, the decisions and the
+actuator events on MQTT. The true state of the rooms is not on any topic it may
+read, so the dashboard shows what was measured, never what was true.
+
+\subsection{12.1 The building now: layers and alerts in the BuildSim viewer}
+
+viz writes five room layers to BuildSim once per real second, and the 3D viewer
+colours each room by the layer chosen. The viewer itself is provided by the
+course; what is ours is what is mapped into it.
+
+\begin{longtable}[]{@{}L{0.24\linewidth}L{0.18\linewidth}L{0.16\linewidth}L{0.32\linewidth}@{}}
+\toprule
+\textbf{Layer} & \textbf{Source} & \textbf{Range} & \textbf{Colours} \\
+\midrule
+\endhead
+\COtwo{} & sensor reading & 400--1600 ppm & Blue to red around grey at the 1000~ppm limit \\
+People counted & sensor reading & 0--50 & Light to dark blue \\
+People expected soon & prediction & 0--50 & Light to dark blue \\
+Airflow & actuator state & 0--100~\% of the room's maximum & Light to dark blue \\
+Temperature & sensor reading & 17--27 °C & Blue to red around grey at 22~°C \\
+\bottomrule
+\end{longtable}
+
+A quantity of ``how much'' is one hue from light to dark; a quantity on either
+side of a target is blue and red around a neutral grey that sits exactly on the
+target. Airflow is shown as a share of each room's own maximum, because an
+office's 20~l/s and a lecture room's 900~l/s do not fit one scale. A room drops
+out of a layer when its reading is more than 180~s old or its sensor has been
+found stuck: either colour would claim something nobody measured.
+
+Alerts are the current picture, at most 100, most severe first:
+
+\begin{longtable}[]{@{}L{0.11\linewidth}L{0.36\linewidth}L{0.22\linewidth}L{0.21\linewidth}@{}}
+\toprule
+\textbf{Severity} & \textbf{Alert} & \textbf{Raised by} & \textbf{Cleared by} \\
+\midrule
+\endhead
+Critical & \COtwo{} override in a room & event \code{override\_co2} & \code{override\_released} \\
+Warning & No reading from a room's sensor & a reading older than 180~s & its next reading \\
+Warning & A sensor looks stuck, with what was seen and what the system does about it & a decision with a \code{fault} & the next decision without one \\
+Warning & Damper or radiator valve on fallback & event \code{ttl\_expired} & the next accepted command \\
+Warning & Command rejected & event \code{rejected} & five minutes later \\
+Info & No trained model, once for the building & decisions in mode \code{no\_forecast} & normal decisions \\
+\bottomrule
+\end{longtable}
+
+\missingfigure{Screenshot of the BuildSim viewer with the \COtwo{} layer and at
+least one alert, for example during \code{deploy/fault-tests.sh}:
+\code{http://127.0.0.1:9090/?layer=co2\&floor=level0}.}
+
+\subsection{12.2 The building over time: the graphs page}
+
+The viewer answers ``what is the building doing now''. Most of what a
+ventilation system is asked is about time: did the air stay good through the
+lecture, when did the damper open, what did the fault do. viz therefore serves
+its own page, one HTML file with no outside dependencies, so it also works
+without internet.
+
+\begin{itemize}
+\tightlist
+\item \textbf{The building:} people counted, ventilation power and its share
+  of what constant flow would use, rooms above the \COtwo{} limit, and alerts;
+  three graphs over time; the alert log; a table of every room.
+\item \textbf{One room:} \COtwo{} with the limit and the override level; people
+  counted and people ventilated for; airflow commanded and reached, with design
+  and maximum flow; temperature and setpoint with the comfort band. The times
+  an alert was active are shaded in all four.
+\item The range is the last hour, 6 hours, 24 hours or 7 days. Pointing at a
+  moment in one graph shows it in all of them, by mouse or keyboard, and every
+  graph has its values as a table underneath.
+\end{itemize}
+
+In every graph blue is what was measured or reached and orange is what the
+controller expected or commanded; yellow and red mean an alert and nothing
+else. A minute in which nothing was seen is a hole in the line, never a zero
+and never the previous value. The one derived number, ventilation power, is
+the summed reached airflow times the energy proxy's constants for fans and
+supply-air heating; the radiators are left out because their power depends on
+the true room temperature, which the dashboard never sees.
+
+The history is held in viz's memory, one point per room and model minute for a
+week. Storage remains the owner of the history: after a restart viz reads the
+run so far from it, so a killed dashboard comes back with its graphs (T-39).
+
+\missingfigure{Screenshot of the graphs page, room view, showing a fault: for
+example room 1570 during the stuck \COtwo{} sensor of T-36 (flat \COtwo{} line,
+shaded alert period, the damper's step to design flow).
+\code{http://127.0.0.1:8060}.}
+
+What the graphs showed that the tables had not: summed over the building, the
+predictive policy's ``people ventilated for'' runs well ahead of the people
+counted in the morning (57 against 6 at 09:29 on a development run). That gap
+is the extra energy over the reactive policy, as a picture.

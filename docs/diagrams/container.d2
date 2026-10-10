@@ -1,3 +1,9 @@
+# C4 Level 2, view 1 of 2: the control loop and the data path.
+# One box is one compose service (the two device boxes are 150 and 100
+# containers). Arrows point the way the data flows; a two-way arrow says
+# which way each part goes.
+# The registry and the dashboard are in container-support.d2: every link in one
+# picture is too dense to print.
 vars: {
   d2-config: {
     layout-engine: elk
@@ -6,61 +12,56 @@ vars: {
 
 direction: down
 
-manager: "Facility manager\n[Person]\nWatches the building" {
-  shape: person
-}
-bs: "BuildSim\n[Software System, from course]\nShared state: sensor values,\nactuator state, 3D viewer"
-occ: "occupancysim\n[Software System, course example, modified]\nPeople and the model clock" {
-  style.stroke-dash: 4
-}
-installer: "Installer\n[Person]\nMounts and registers devices" {
-  shape: person
-}
+(** -> **)[*].style.font-size: 19
+(** <-> **)[*].style.font-size: 19
 
-sys: "Ventilation Control  [System]" {
-  style.stroke-dash: 4
-  style.fill: transparent
-
-  physics: "physics\n[Container: Go]\nCO₂ and heat balance per room;\nserves the truth, relays model time"
-  registry: "registry\n[Container: Go + SQLite]\nInstalled devices, rooms, sizing" {
-    shape: cylinder
+classes: {
+  container: {
+    style: {fill: "#438DD5"; stroke: "#2E6295"; font-color: "#ffffff"; font-size: 20}
   }
-  sensors: "Sensor devices ×3 per room\nco2-NNNN · temp-NNNN · occ-NNNN\n[One container each: Go]\nSample truth, add noise and faults"
-  broker: "mosquitto\n[MQTT broker]\nobs · truth · decision · event · time" {
+  truth: {
+    style: {fill: "#2A6F97"; stroke: "#1F5271"; font-color: "#ffffff"; font-size: 20}
+  }
+  store: {
+    shape: cylinder
+    style: {fill: "#438DD5"; stroke: "#2E6295"; font-color: "#ffffff"; font-size: 20}
+  }
+  external: {
+    style: {fill: "#8C8C8C"; stroke: "#6E6E6E"; font-color: "#ffffff"; font-size: 20}
+  }
+}
+
+occ: "occupancysim\n[External: course example, modified]\nPeople and the model clock" {class: external}
+bs: "BuildSim\n[External: provided by the course]\nShared building state" {class: external}
+
+sys: "Ventilation Control [System]" {
+  style: {stroke-dash: 4; fill: transparent; font-size: 22}
+
+  physics: "physics\n[Container: Go]\nThe truth: CO₂ and heat\nbalance per room" {class: truth}
+  sensors: "Sensor devices, 3 per room\nco2-, temp-, occ-NNNN\n[One container each: Go]\nSample, add noise and faults" {class: container}
+  broker: "mosquitto\n[Container: MQTT broker]" {
     shape: queue
+    style: {fill: "#438DD5"; stroke: "#2E6295"; font-color: "#ffffff"; font-size: 20}
   }
-  controller: "controller\n[Container: Go]\nValidate → predict → act"
-  actuators: "Actuator devices ×2 per room\ndamper-NNNN · heat-NNNN\n[One container each: Go]\nValidate, enforce safety, travel"
-  storage: "storage\n[Container: Go]\nJSONL per run; history + models" {
-    shape: cylinder
-  }
-  train: "train\n[Batch job: Go]\nPer-room occupancy profile"
-  viz: "viz\n[Container: Go]\nDashboard: layers and alerts in the\nviewer; its own page with graphs"
+  controller: "controller\n[Container: Go]\nValidate, predict, decide" {class: container}
+  actuators: "Actuator devices, 2 per room\ndamper-, heat-NNNN\n[One container each: Go]\nValidate, enforce safety, travel" {class: container}
+  storage: "storage\n[Container: Go, JSONL files]\nEvery record, per run;\nhistory and models" {class: store}
+  train: "train\n[Batch container: Go]\nBuilds the occupancy profile" {class: container}
 }
 
-installer -> sys.registry: "Registers id, kind, room [REST / web form]"
-occ -> bs: "Occupancy, entities [REST]"
-occ -> sys.physics: "Clock, occupancy per minute [REST]"
-bs -> sys.physics: "Actuator state [REST]"
-sys.sensors -> sys.registry: "Check in, learn room [REST]"
-sys.actuators -> sys.registry: "Check in, advertise address [REST]"
-sys.controller -> sys.registry: "Rooms, actuator addresses [REST]"
-sys.registry -> bs: "Equipment records [REST]"
-sys.sensors -> sys.physics: "Truth per room [REST]"
-sys.sensors -> bs: "Readings [REST]"
+occ -> sys.physics: "clock, people per\nminute [REST]"
+bs -> sys.physics: "reached actuator\nstates [REST]"
+sys.physics -> sys.sensors: "truth per room [REST]"
+sys.physics -> sys.broker: "truth/#, time/model\n[MQTT]"
+sys.sensors -> bs: "readings [REST]"
 sys.sensors -> sys.broker: "obs/# [MQTT]"
-sys.physics -> sys.broker: "truth/# [MQTT]"
-sys.broker -> sys.controller: "obs/# [MQTT]"
-sys.controller -> sys.broker: "decision/# [MQTT]"
-sys.controller -> sys.actuators: "Commands [REST]"
-sys.broker -> sys.actuators: "CO₂ for the override, model time [MQTT]"
-sys.actuators -> bs: "Reached state [REST]"
-sys.broker -> sys.storage: "obs, truth, decisions [MQTT]"
-sys.storage -> sys.controller: "Latest model [REST]"
-sys.train <-> sys.storage: "History in, model out [REST]"
-sys.broker -> sys.viz: "obs, decisions, events [MQTT]"
-sys.viz -> bs: "Room layers, alerts; reads the dampers' state [REST]"
-sys.viz -> sys.storage: "The run so far, after a restart [REST]"
-manager -> sys.viz: "Graphs over time [web page]"
-manager -> bs: "3D view, alerts [web page]"
-sys.viz -> sys.registry: "Each room's maximum flow [REST]"
+
+sys.broker <-> sys.controller: "obs/# in,\ndecision/# out [MQTT]"
+bs -> sys.controller: "readings, if the broker\nis silent [REST]" {style.stroke-dash: 3}
+sys.controller -> sys.actuators: "commands [REST]"
+sys.broker <-> sys.actuators: "CO₂ obs and time in,\nevent/# out [MQTT]"
+sys.actuators -> bs: "reached state [REST]"
+
+sys.broker -> sys.storage: "obs, truth, decision,\nevent [MQTT]"
+sys.storage -> sys.controller: "model; the oracle's\nrecorded run [REST]"
+sys.storage <-> sys.train: "history out,\nmodel back [REST]"

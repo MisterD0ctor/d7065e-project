@@ -1,0 +1,83 @@
+\section{1. Summary}
+
+The system ventilates and heats 50 rooms of the LTU A-house, as modelled in
+BuildSim, so that the air stays good while as little energy as possible is
+spent on rooms nobody is in. Every room has a \COtwo{} sensor, a temperature
+sensor and a people counter, a ventilation damper and a radiator valve; each of
+these 250 devices is its own process. A controller decides the airflow and the
+heating setpoint for every room once per model minute, and can start
+ventilating before people arrive, from an occupancy profile learned from stored
+readings. BuildSim holds the shared building state; this project provides the
+room physics, the devices, the control, the storage and the dashboard around
+it.
+
+One principle runs through the design: \textbf{the controller proposes, and
+nothing depends on the controller being right.} The actuators enforce the
+safety limits themselves, a room whose sensor or controller goes quiet falls
+back to design airflow on its own, and the true state of the rooms never
+reaches the controller, only what the sensors report. Whatever fails, the
+failure is towards more air, not less.
+
+\begin{longtable}[]{@{}L{0.26\linewidth}L{0.68\linewidth}@{}}
+\toprule
+\textbf{Field} & \textbf{Value} \\
+\midrule
+\endhead
+\textbf{Project title} & Energy-Aware Ventilation \& Climate Control \\
+\textbf{Team members} & Kasper Axelsson, Mohamd Amar Chms Aldden \\
+\textbf{Use case} & Indoor air quality and thermal comfort at minimum energy \\
+\textbf{Repository} & \url{https://github.com/MisterD0ctor/d7065e-project} \\
+\textbf{Version / date} & Draft, commit \code{e9b01be} / 2026-10-10 \\
+\bottomrule
+\end{longtable}
+
+\textbf{Changes since the proposal.} Each change below was forced by something
+we measured or by a course rule we had missed. Their consequences are discussed
+in Section 13.
+
+\begin{longtable}[]{@{}L{0.25\linewidth}L{0.27\linewidth}L{0.40\linewidth}@{}}
+\toprule
+\textbf{The proposal said} & \textbf{Now} & \textbf{What forced it} \\
+\midrule
+\endhead
+The controller never sees occupancy and estimates it from \COtwo{} alone &
+Every room has a people counter, with noise and faults like any other sensor &
+Time. The proposal named this as the fallback. The \COtwo{} mass balance it
+wanted to invert survives as the check that finds a stuck counter (D-11) \\
+We simulate the people ourselves &
+The course's occupancysim, changed in two places: fixed 5-second steps and a
+record of every room at every whole minute &
+Two runs of the same day agreed in only 99.6--99.7~\% of samples, so the
+oracle replayed a slightly different week. After the change they are
+identical (T-25) \\
+Sensors and actuators as two components &
+One process per device, 250 of them, and a registry in which an installer
+commissions each one &
+Lecture 1 makes one process per sensor and actuator a pass/fail rule; the
+lecturer suggested the installer's database \\
+REST, with a broker if polling does not keep up &
+MQTT for observations, decisions and events; REST polling of BuildSim kept as
+the fallback &
+Four consumers need the same readings: controller, damper override, storage
+and dashboard \\
+Safety is part of the controller &
+The damper enforces the flow floors, the \COtwo{} override and the command TTL
+itself &
+An override that dies with the controller protects nothing (Lecture 1,
+``independent, bounded override'') \\
+Heating follows a schedule &
+The schedule, with an optimal start before 07:00 &
+The first evaluation: rooms at 17.9~°C at 07:00 and below 20~°C until 08:13 \\
+Gradient boosting if a time-of-day profile is too blunt &
+The profile stayed &
+The profile is not what limits the forecast: lecture rooms have no pattern
+to learn (Section 11). A larger model would not help; a timetable input would \\
+A dashboard overlay on the 3D view &
+The overlay, and our own page with graphs over time &
+The viewer shows the building now; the questions asked of a ventilation system
+are about how it got there \\
+Evaluation over a simulated week &
+Five simulated weekdays per policy, and a training week before them &
+Weekends are empty, and four policies had to fit in a day of runs (NFR-8) \\
+\bottomrule
+\end{longtable}

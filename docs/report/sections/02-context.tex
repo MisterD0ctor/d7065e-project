@@ -1,0 +1,68 @@
+\section{2. Use case and building context}
+
+\textbf{The building.} BuildSim models the LTU A-house: three floors and 838
+rooms, with a REST API for equipment, sensor values and actuator states, and a
+3D viewer. It stores the current state only. It has no physics, no history, no
+clock, and it comes back blank after a restart. We instrument 50 rooms on the
+ground floor: the 3 fika rooms, 20 lecture rooms, 24 offices and 3 small rooms
+that the people simulation never uses. They are a seeded random sample, listed
+in \code{deploy/devices.csv}, so the set is the same in every run.
+
+\textbf{The people.} occupancysim, a course example, generates each day from a
+seed and the date: staff in their offices, fika breaks around 09:45 and 14:30,
+lunch at 12:00--13:00, lectures in four fixed slots, and three guards on patrol
+at night. It also owns the model clock, which runs 60 or 120 times faster than
+real time in our runs. Every time and duration in this document is model time
+unless it says ``real''.
+
+\textbf{How our processes use BuildSim.} The devices write to BuildSim, and
+only the devices:
+\begin{itemize}
+\tightlist
+\item Each \textbf{sensor device} writes its reading
+  (\code{PUT /api/sensors/\{id\}/value}).
+\item Each \textbf{actuator device} writes the state it has reached
+  (\code{PUT /api/actuators/\{id\}/state}).
+\item \textbf{physics} reads the actuators' reached states from BuildSim and
+  never writes to it.
+\item The \textbf{registry} creates the equipment records, and recreates them
+  when BuildSim restarts.
+\item \textbf{viz} writes the room layers and alerts the viewer shows.
+\end{itemize}
+This differs from the report guide, which has the simulator write sensor values
+into BuildSim and sensor processes read them back. We follow Lectures 1 and 2
+instead: sensor processes produce the readings, and the true room state never
+enters BuildSim or anything the controller can read. The course material
+disagrees with itself here, and the lectures' version is the one that keeps the
+truth out of the controller's reach.
+
+\textbf{Actors.} The \emph{facility manager} watches air quality, energy and
+alerts, in the 3D viewer and on our graphs page. The \emph{installer} mounts
+devices and records each one's id, kind and room in the registry; a device does
+nothing until that is done. \emph{Occupants} affect the system only by being in
+a room. None of them is on the control path.
+
+\textbf{Why the decision is not trivial.} Air quality and energy pull in
+opposite directions, and a room answers slowly. Its \COtwo{} time constant is
+the room volume divided by the airflow: about 12 minutes for a lecture room at
+design flow, about an hour for an office, and about two hours for any room
+while its damper sits at the occupied minimum. A controller that waits for the
+\COtwo{} sensor to show that a room has filled is already behind. One that
+knows the room is about to fill can open the damper early and gently. Whether
+that is worth anything here is what the evaluation in Section 11 measures, by
+comparing four policies over the same simulated week: constant design flow,
+reactive control on measured \COtwo{}, our predictive policy, and an oracle
+that knows the true future occupancy.
+
+\textbf{Scenario for the demonstration.} On a weekday morning the fika room
+1570 is empty and its \COtwo{} is at 417~ppm. At 09:28 the predictive policy
+raises its airflow to 112~l/s for the 11 people the profile expects within the
+room's lead time of 22 minutes; the break starts at about 09:45. Then a
+\COtwo{} sensor is frozen: after five identical readings the controller stops
+believing it, commands design flow, and the dashboard raises an alert. Finally
+the controller is stopped: every damper's last command expires after 300
+seconds and it returns to design flow on its own.
+
+\todo{Confirm that this is the demo you will give, or replace it. The first two
+steps have been run (2026-09-30 smoke test; T-36). The third, stopping the
+controller, has no recorded run yet (T-10, T-23).}

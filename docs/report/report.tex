@@ -1,0 +1,131 @@
+% Final report (architecture document), D7065E.
+% Build with `make` in this directory: it renders ../diagrams/*.d2 into
+% figures/ and compiles this file. The text is in sections/.
+\PassOptionsToPackage{unicode}{hyperref}
+\PassOptionsToPackage{hyphens}{url}
+\PassOptionsToPackage{dvipsnames,svgnames,x11names}{xcolor}
+\documentclass[11pt]{article}
+\usepackage{amsmath,amssymb}
+\usepackage{lmodern}
+\usepackage{iftex}
+\ifPDFTeX
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \usepackage{textcomp}
+\fi
+\IfFileExists{microtype.sty}{\usepackage[]{microtype}\UseMicrotypeSet[protrusion]{basicmath}}{}
+\usepackage{parskip}
+\usepackage{xcolor}
+\IfFileExists{xurl.sty}{\usepackage{xurl}}{}
+\usepackage{bookmark}
+\hypersetup{
+  pdftitle={Energy-Aware Ventilation and Climate Control: Architecture Document},
+  pdfauthor={Kasper Axelsson, Mohamd Amar Chms Aldden},
+  colorlinks=true,
+  linkcolor={RoyalBlue},
+  filecolor={Maroon},
+  citecolor={Blue},
+  urlcolor={Blue}}
+\urlstyle{same}
+\usepackage[a4paper,margin=2.4cm]{geometry}
+\usepackage{longtable,booktabs,array}
+\usepackage{calc}
+\usepackage{graphicx}
+\usepackage{caption}
+\captionsetup{font=small,labelfont=bf,skip=6pt}
+\usepackage{float}
+\usepackage{fancyvrb}
+\setlength{\emergencystretch}{3em}
+\providecommand{\tightlist}{\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+\setcounter{secnumdepth}{-\maxdimen}
+\usepackage{newunicodechar}
+\newunicodechar{°}{\textdegree}
+\newunicodechar{₂}{\textsubscript{2}}
+\newunicodechar{→}{\ensuremath{\rightarrow}}
+\newunicodechar{≤}{\ensuremath{\leq}}
+\newunicodechar{≥}{\ensuremath{\geq}}
+\newunicodechar{≈}{\ensuremath{\approx}}
+\newunicodechar{×}{\ensuremath{\times}}
+\newunicodechar{✓}{\ensuremath{\checkmark}}
+\newunicodechar{–}{--}
+\newunicodechar{—}{---}
+\usepackage{etoolbox}
+\AtBeginEnvironment{longtable}{\footnotesize}
+\AtBeginEnvironment{tabular}{\footnotesize}
+\usepackage{fancyhdr}
+\pagestyle{fancy}\fancyhf{}
+\rhead{\small D7065E\,--\,Architecture Document}
+\lhead{\small Energy-Aware Ventilation \& Climate Control}
+\cfoot{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\usepackage{titlesec}
+\titleformat{\section}{\Large\bfseries}{\thesection}{0.6em}{}
+\titleformat{\subsection}{\large\bfseries}{\thesubsection}{0.5em}{}
+\titleformat{\subsubsection}{\normalsize\bfseries}{\thesubsubsection}{0.5em}{}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.16}
+
+% --- helpers ----------------------------------------------------------------
+\newcommand{\COtwo}{CO\textsubscript{2}}
+\newcommand{\code}[1]{\texttt{#1}}
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+% Something the authors still have to do. Every \todo must be gone before
+% submission: `grep -n '\\todo' sections/*.tex report.tex`.
+\definecolor{todored}{RGB}{176,0,32}
+\newcommand{\todo}[1]{\par\noindent{\setlength{\fboxsep}{5pt}%
+  \fcolorbox{todored}{todored!6}{\parbox{\dimexpr\linewidth-2\fboxsep-2\fboxrule}{%
+  \small\textcolor{todored}{\textbf{To do before submission.}} #1}}}\par\vspace{0.4em}}
+% A figure that does not exist yet.
+\newcommand{\missingfigure}[1]{\par\begin{center}\fcolorbox{todored}{todored!6}{%
+  \parbox[c][2.4cm][c]{0.82\linewidth}{\centering\small\textcolor{todored}{\textbf{Missing figure.}} #1}}\end{center}\par}
+\DefineVerbatimEnvironment{json}{Verbatim}{fontsize=\footnotesize,xleftmargin=1em}
+% ---------------------------------------------------------------------------
+
+\begin{document}
+
+\begin{center}
+{\LARGE Energy-Aware Ventilation \& Climate Control\par}
+\vspace{0.5em}
+{\large D7065E, Architecture Document\par}
+\vspace{1em}
+{Kasper Axelsson \& Mohamd Amar Chms Aldden\par}
+\vspace{0.3em}
+{\small Draft of 10 October 2026\par}
+\end{center}
+
+\todo{This is a first full draft, written from \code{docs/*.md} and the code as
+of commit \code{e9b01be}. Read every section against what you built. Open
+points, each also marked where it belongs:
+(1) the dashboard screenshots (Section 12);
+(2) a response-over-time plot from the evaluation runs (Section 11);
+(3) the tests with no recorded run: T-10, T-14, T-15, T-21, T-23, T-31, and
+the larger-building part of T-22 (Section 10);
+(4) the requirement priorities in Section 3, which are proposed, not decided;
+(5) two requirements whose stated criterion is \emph{not} met, FR-4 and the
+second half of NFR-3: decide how to word them (Sections 3, 10 and 11);
+(6) the demo scenario in Section 2;
+(7) the version and date in Section 1.}
+
+\vspace{0.6em}
+
+{
+\hypersetup{linkcolor=black}
+\setcounter{tocdepth}{2}
+\tableofcontents
+}
+
+\input{sections/01-summary}
+\input{sections/02-context}
+\input{sections/03-requirements}
+\input{sections/04-architecture}
+\input{sections/05-interfaces}
+\input{sections/06-physical-model}
+\input{sections/07-autonomy}
+\input{sections/08-behaviour}
+\input{sections/09-deployment}
+\input{sections/10-test-plan}
+\input{sections/11-evaluation}
+\input{sections/12-dashboard}
+\input{sections/13-risks}
+
+\end{document}

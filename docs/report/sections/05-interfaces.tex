@@ -1,0 +1,260 @@
+\section{5. Interfaces and data contracts}
+
+% Long literal names in this section: let lines stretch instead of sticking out.
+\sloppy
+
+Each contract says what is sent, in which units, how often, when it counts as
+stale, and what happens when the other side does not answer. The same
+contracts, with every field, are kept next to the code in
+\code{docs/interfaces.md}.
+
+Conventions for every interface:
+\begin{itemize}
+\tightlist
+\item \textbf{Rooms} are keyed \code{<level>/<room>}, for example
+  \code{level0/A109}. Room names repeat between floors.
+\item \textbf{Model time} is RFC~3339 as occupancysim's clock gives it, for
+  example \code{2026-09-21T10:15:00Z}. Real time is used only for network
+  timeouts.
+\item \textbf{Run id.} Every process takes \code{RUN\_ID} from its environment
+  and puts it in every record it publishes.
+\item Values written to BuildSim are \textbf{strings} (BuildSim's rule). Values
+  on MQTT and on our own HTTP APIs are JSON numbers.
+\item MQTT is QoS~1, not retained except the model time, with a login per
+  service. The broker's access list decides who may read and write each topic.
+\end{itemize}
+
+\begin{longtable}[]{@{}L{0.06\linewidth}L{0.30\linewidth}L{0.19\linewidth}L{0.24\linewidth}L{0.09\linewidth}@{}}
+\toprule
+\textbf{ID} & \textbf{Interface} & \textbf{Writer} & \textbf{Readers} & \textbf{Protocol} \\
+\midrule
+\endhead
+IF-1 & Model clock, people per minute & occupancysim; physics relays the time & physics; actuators & REST, MQTT \\
+IF-2 & Truth API & physics & sensor devices only & REST \\
+IF-3 & Sensor readings in BuildSim & each sensor device & viewer; controller and damper as fallback & REST \\
+IF-4 & Observations \code{obs/\ldots} & each sensor device & controller, dampers, storage, viz & MQTT \\
+IF-5 & Truth \code{truth/\ldots} & physics & storage only & MQTT \\
+IF-6 & Decisions \code{decision/\ldots} & controller & storage, viz & MQTT \\
+IF-7 & Actuator events \code{event/\ldots} & actuator devices & storage, viz & MQTT \\
+IF-8 & Actuator command & controller & one actuator device & REST \\
+IF-9 & Actuator state in BuildSim & each actuator device & physics, viz, viewer & REST \\
+IF-10 & Storage API & storage & controller, train, viz, people & REST \\
+IF-11 & Room layers, alerts; graphs page & viz & viewer; a browser & REST \\
+IF-12 & Device registry & registry & installer, devices, controller, viz & REST \\
+\bottomrule
+\end{longtable}
+
+\subsection{The truth side}
+
+\textbf{IF-1, clock and people.}
+\code{GET occupancysim:8081/api/minutes?after=<time>} returns the clock and who
+was in each room at every whole minute after \code{after}:
+
+\begin{json}
+{"clock": {"time": "2026-09-21T10:16:25Z", "factor": 120, "running": true},
+ "minutes": [
+  {"time": "2026-09-21T10:15:00Z", "rooms": {"level0/1570": {"occupants": 16}}},
+  {"time": "2026-09-21T10:16:00Z", "rooms": {"level0/1570": {"occupants": 17, "guards": 1}}}]}
+\end{json}
+
+\code{occupants} counts everyone; \code{guards} says how many of them are night
+guards. Empty rooms are left out. The last 240 minutes are kept. Physics asks
+every 250~ms real. A paused clock gives no new minutes, so physics does not
+step; it never extrapolates. On a timeout (500~ms) physics keeps its state and
+asks again; the minutes it missed are still in the record. Physics also
+publishes the time as a retained message on \code{time/model}
+(\code{\{"model\_time": \ldots, "factor": 60\}}) every tick, which is where the
+actuators take it from.
+
+\textbf{IF-2, truth API.} \code{GET physics:8080/rooms?room=level0/A109}
+returns \code{\{"run\_id", "model\_time", "rooms": \{"level0/A109":
+\{"co2\_ppm": 612.4, "temp\_c": 21.3, "occupancy": 6\}\}\}}. Units: ppm, °C,
+persons. \code{model\_time} is the whole minute the values belong to. A sensor
+polls every 250~ms real and takes a reading when \code{model\_time} has
+advanced by its sample period. On a timeout (500~ms) it publishes nothing, so
+it goes silent downstream, which is what a dead device looks like.
+
+\textbf{IF-5, truth topic} \code{truth/<level>/<room>}, one record per room and
+model minute, readable by storage only:
+
+\begin{json}
+{"run_id": "eval-reactive-v2", "room": "level0/A109",
+ "model_time": "2026-09-21T10:15:00Z",
+ "co2_ppm": 612.4, "temp_c": 21.3, "occupancy": 6, "guards": 0,
+ "airflow_ls": 180.0, "setpoint_c": 21.0,
+ "fan_w": 270.0, "ahu_heat_w": 2160.0, "radiator_w": 310.0}
+\end{json}
+
+The three powers are averages over the minute that ended at \code{model\_time}
+and are what the energy proxy sums. Physics does not buffer: a gap in the truth
+shows as missing minutes in the evaluation and is reported, not filled.
+
+\subsection{Observations}
+
+\textbf{IF-3, readings in BuildSim.}
+\code{PUT /api/sensors/\{device id\}-reading/value} with
+\code{\{"data\_type": "text", "value": "612"\}}: \COtwo{} as an integer in ppm,
+temperature with one decimal in °C, the count as an integer. One write per
+sensor per sample (60~s). On failure the sensor retries three times 100~ms
+apart, then drops the reading. A \code{404} means BuildSim has lost the
+equipment; the registry recreates it within 10~s real.
+
+\textbf{IF-4, observations} \code{obs/<level>/<room>/<kind>}, where
+\code{kind} is \code{co2}, \code{temp} or \code{occupancy}, published right
+after the IF-3 write:
+
+\begin{json}
+{"run_id": "eval-reactive-v2", "sensor_id": "co2-0017", "room": "level0/A109",
+ "kind": "co2", "value": 612, "unit": "ppm",
+ "model_time": "2026-09-21T10:15:00Z", "seq": 1789985700}
+\end{json}
+
+\code{seq} is the reading's model time in Unix seconds: unique per sensor,
+increasing, and unchanged by a restart. Consumers drop duplicates on
+\code{(sensor\_id, seq)}, because QoS~1 can deliver twice. A consumer judges
+freshness by \code{model\_time}, never by arrival: older than 180~s is stale.
+An injected fault is not marked in the message; finding it is the controller's
+job. When no observation has arrived for 2.5 times the usual real-time gap (at
+least 1.5~s), the controller and the dampers read IF-3 instead until messages
+return.
+
+\subsection{Decisions, commands and actuator state}
+
+\textbf{IF-8, command.}
+\code{POST http://<actuator endpoint>/rooms/\{level\}/\{room\}/command}. The
+endpoint is the one the actuator advertised to the registry (IF-12).
+
+\begin{json}
+{"cmd_id": "1cb852f9fc5fe3f1579b2f0f5442e5b1", "value": 112.4, "unit": "l/s",
+ "issued_at": "2026-09-21T09:28:00Z", "ttl_s": 300,
+ "reason": "predictive: CO2 417 ppm, 11 people within 22 min"}
+\end{json}
+
+\begin{longtable}[]{@{}L{0.36\linewidth}L{0.56\linewidth}@{}}
+\toprule
+\textbf{Response} & \textbf{Meaning} \\
+\midrule
+\endhead
+\code{202 \{"target": 112.4, "clamped": false\}} & Accepted. \code{target} is what the actuator will move to; \code{clamped} says the safety limits changed it \\
+\code{200 \{"duplicate": true\}} & This \code{cmd\_id} was already handled; nothing changes \\
+\code{409 \{"reason": "expired"\}} & \code{issued\_at + ttl\_s} is before the actuator's model time \\
+\code{422 \{"reason": \ldots\}} & Out of range, wrong unit, unknown room, or no \code{cmd\_id} \\
+\bottomrule
+\end{longtable}
+
+Units and ranges: a damper takes l/s from 0 to the room's maximum
+(1.5 × design flow); a radiator valve takes a setpoint from 16 to 24~°C. The
+controller sends at most one command per room and reading, waits 500~ms, and
+retries the \emph{same} \code{cmd\_id} up to three times, which idempotency
+makes safe. If no valid command arrives within \code{ttl\_s}, the actuator
+returns to its fallback (design flow, or 21~°C) and publishes
+\code{ttl\_expired}.
+
+\textbf{IF-6, decision} \code{decision/<level>/<room>}, one record per command:
+
+\begin{json}
+{"run_id": "eval-predictive-v3", "room": "level0/1570",
+ "model_time": "2026-09-21T09:28:00Z", "policy": "predictive",
+ "mode": "normal", "fault": "", "observed": {"co2": 417},
+ "predicted_occupancy": 11, "lead_min": 21.6, "airflow_target_ls": 112.4,
+ "cmd_id": "1cb8...", "status": 202, "applied_target": 112.4, "clamped": false,
+ "reason": "predictive: CO2 417 ppm, 11 people within 22 min"}
+\end{json}
+
+A heating decision carries \code{setpoint\_target\_c} instead of the airflow
+fields. \code{mode} says what the decision rests on (\code{normal},
+\code{no\_forecast}, \code{degraded\_occupancy}, \code{degraded\_co2},
+\code{degraded\_temp}; Section 7.1), and \code{fault} says what the controller
+saw when it found a sensor stuck, for example ``\COtwo{} sensor has read
+425~ppm 5 times in a row''.
+
+\textbf{IF-7, actuator events} \code{event/<level>/<room>}:
+\code{\{"run\_id", "room", "model\_time", "actuator": "damper", "kind",
+"detail"\}}, where \code{kind} is \code{override\_co2},
+\code{override\_released}, \code{ttl\_expired} or \code{rejected}. Published
+when the thing happens, not every tick.
+
+\textbf{IF-9, actuator state in BuildSim.}
+\code{PUT /api/actuators/\{device id\}-state/state} with
+\code{\{"state": "180.0"\}}: l/s or °C with one decimal. The actuator writes
+the state it has \emph{reached}, not the target. Airflow moves at most 10~\% of
+the room's maximum per minute, a setpoint at most 0.5~°C per minute. The
+actuator steps once per real second and writes when the value has changed.
+Physics reads all states with one \code{GET /api/equipment?level=level0} per
+tick; a missing or unreadable state means it keeps the last value.
+
+\subsection{Storage, dashboard and registry}
+
+\textbf{IF-10, storage API} (port 8090):
+
+\begin{longtable}[]{@{}L{0.46\linewidth}L{0.46\linewidth}@{}}
+\toprule
+\textbf{Call} & \textbf{Returns} \\
+\midrule
+\endhead
+\code{GET /history?run=\&room=\&kind=\&from=\&to=} & JSONL, one stored record per line, in the order stored. \code{kind} is \code{co2}, \code{temp}, \code{occupancy}, \code{truth}, \code{true\_occupancy}, \code{decision} or \code{event}; \code{from} is inclusive and \code{to} exclusive, in model time \\
+\code{GET /runs} & The recorded run ids \\
+\code{GET /runs/\{run\}/export} & A tar of the run's four JSONL files \\
+\code{PUT /models/\{name\}}, \code{GET /models/latest} & Store a model; fetch the newest \\
+\code{GET /healthz} & Counts of records stored, duplicates dropped and records rejected \\
+\bottomrule
+\end{longtable}
+
+Storage checks every record before appending it: valid JSON, a safe
+\code{run\_id}, a room and an RFC~3339 \code{model\_time}. A bad record is
+counted and logged, never silently dropped. \code{kind=truth} and
+\code{kind=true\_occupancy} for the run in progress return \code{403}: the
+oracle may only replay a finished run. Readers time out after 2~s; the
+controller then keeps the model it has.
+
+The model \code{train} writes is the per-room profile of Section 7.1:
+
+\begin{json}
+{"name": "profile-train-week-v3", "slot_min": 15, "quantile": 0.8,
+ "slot_quantile": 0.75,
+ "trained_on": {"run_ids": ["train-week-v2"], "weekdays": 5, "readings": 360000},
+ "rooms": {"level0/1570": {"mean": [0, ...], "high": [0, ...], "days": [5, ...]}}}
+\end{json}
+
+\textbf{IF-11, dashboard.} viz is the only writer of room layers and alerts,
+because every collection \code{PUT} in BuildSim replaces the whole collection.
+\code{PUT /api/room-layers} sends all five layers once per real second;
+\code{PUT /api/alerts} sends at most 100 alerts, most severe first, when the
+list changes and every 30~s real. The graphs page is served on port 8060:
+\code{GET /api/overview?minutes=N} for the building and
+\code{GET /api/room?room=\ldots\&minutes=N} for one room, both with one value
+per model minute and \code{null} where nothing was seen. Section 12 lists the
+layers and alerts.
+
+\textbf{IF-12, registry} (port 8070; the installer's form is at \code{/}):
+
+\begin{longtable}[]{@{}L{0.40\linewidth}L{0.14\linewidth}L{0.38\linewidth}@{}}
+\toprule
+\textbf{Call} & \textbf{Who} & \textbf{Returns} \\
+\midrule
+\endhead
+\code{POST /devices \{id, kind, room, installed\_by\}} & installer & \code{201} and the device; \code{409} id taken; \code{422} unknown kind, bad id, or a room that is not in the floor plan \\
+\code{GET /devices?kind=\&room=\&status=} & controller, viz & The matching devices \\
+\code{PUT /devices/\{id\}/checkin \{endpoint\}} & the device & \code{200} and its record; \code{404} not installed; \code{410} retired \\
+\code{DELETE /devices/\{id\}} & installer & Retires the device and removes its equipment from BuildSim \\
+\bottomrule
+\end{longtable}
+
+\begin{json}
+{"id": "damper-0002", "kind": "damper", "room": "level0/1570", "status": "active",
+ "installed_by": "kasper", "endpoint": "http://damper-0002:8080",
+ "last_seen": "2026-09-30T18:21:12Z",
+ "size": {"area_m2": 101.2, "volume_m3": 273.2, "capacity": 25,
+          "design_ls": 210.4, "max_ls": 315.6,
+          "occupied_min_ls": 35.4, "empty_min_ls": 10.1}}
+\end{json}
+
+A device checks in every 5~s real until it gets \code{200}; until then it
+publishes nothing and accepts no commands. A device whose hardware kind differs
+from the registered kind refuses to start. After that it checks in every 30~s
+real, which is what \code{last\_seen} shows. The registry re-sends every
+device's equipment to BuildSim every 10~s real, so a restarted BuildSim is
+repaired without anyone noticing. Running devices keep working without the
+registry; only starting devices wait for it.
+
+\fussy

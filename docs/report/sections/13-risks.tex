@@ -1,0 +1,80 @@
+\section{13. Risks and critical reflection}
+
+\textbf{The headline result is that the clever part buys little.} The proposal
+set out to show that predicting occupancy pays off. It does not, here: reactive
+control on \COtwo{} is within four room-minutes per week of perfect foresight,
+and our predictor closes that gap for 3.8~\% more energy. We think the finding
+is real for this model and would not carry to every building. The dampers reach
+maximum flow in minutes and the maximum is 1.5 times design flow, so a
+reactive controller is never far behind. A building with slower or smaller
+ventilation would show a larger gap. We did not vary those constants, which is
+the experiment we would run next.
+
+\textbf{The predictor cannot see what matters most.} The rooms that fill
+fastest are the lecture rooms, and they are the ones with no pattern: the
+forecast foresaw none of their arrivals. The fix is an input, not a better
+model: the day's bookings are available from occupancysim and could be read as
+a booking system would provide them. We parked that for time.
+
+\textbf{We measured the forecast with the wrong yardstick.} FR-4 asked for a
+lower mean error than ``same as now'', which a deliberately high forecast
+cannot give. We report it as not met and say what should have been asked:
+arrivals foreseen at a stated false-alarm rate.
+
+\textbf{What changed from the proposal, and what it cost.} The proposal's main
+claim was occupancy without an occupancy sensor. We gave each room a people
+counter instead, and the system no longer shows that \COtwo{} alone is enough.
+The mass balance we meant to invert is used only as two bounds, to catch a
+counter that is stuck. A full estimator would also give the degraded mode a
+head-count when the counter fails, which today it replaces with the forecast.
+
+\textbf{Mistakes that the tests did not catch.} Three faults got past the
+unit tests: the predictor that learned sensor noise (its tests used clean
+data), the runs of one day that were not identical (we had written ``same
+seed'' under fairness without checking), and FR-7, which promised a fallback
+for a stuck sensor that nothing detected. The first two were found by looking
+at evaluation results that seemed implausible, the third by re-reading what we
+had promised while writing the alerts. None was found by a failing test. Each
+now has a regression test or a recorded run.
+
+\begin{longtable}[]{@{}L{0.30\linewidth}L{0.28\linewidth}L{0.34\linewidth}@{}}
+\toprule
+\textbf{Risk or assumption} & \textbf{Impact} & \textbf{Mitigation, or decision} \\
+\midrule
+\endhead
+The room physics is our own model, with assumed constants & Energy and comfort figures say as much about the model as about the controllers & Reported as comparisons between policies on the same model, never as absolute savings \\
+A drifting sensor is not detected & A \COtwo{} sensor drifting up ends in the override: safe, wasteful. One drifting down would be believed & Not solved. Cross-checking neighbouring rooms, or the counter against \COtwo{}, is the next step \\
+A people counter stuck on a small number is not found & Seen live: stuck at 4 in a 25-person room for three hours & Accepted: it costs the airflow for four people. Pinned by a unit test so the limit is known \\
+A stuck counter is found only after the air disagrees & 15--20 minutes in a lecture room, about 75 in an office & Accepted; the cost is airflow, not air quality \\
+The stuck-sensor limits come from our own noise model & A real sensor quieter than its resolution repeats itself when healthy and would be blamed & The limits would have to be set from the real sensor's noise at commissioning \\
+The truth API is closed to the controller by convention only & The controller could call physics; it has no code that does & The truth \emph{topic} is enforced by the broker. A separate network for the truth layer would close the rest \\
+Devices do not authenticate to the registry & Any process on the network can pose as a device & A real installation would give each device a secret at commissioning \\
+The broker is a single point for observations & Decisions continue through the BuildSim fallback, but storage records nothing while it is down & Accepted and reported: a 20-minute gap in T-24 \\
+The live count reacts to one false reading & About 5~\% of the predictive policy's decisions in an empty room ventilate for ``one person'' & Requiring two readings would remove it, at a minute's delay for a real first arrival. Not done \\
+Command latency was never measured & NFR-4 is unverified & Records carry model time only; a real-time stamp is needed first \\
+One seed and one week & The ranking of the policies is untested on other weeks & A second seed is five more hours of runs \\
+250 containers on one laptop & A stock laptop stops at about 40 rooms; with three host settings raised, 50 run. More was not tried & One process per device is right for a real installation and expensive to simulate \\
+The heating's warm-up rate is assumed & Rooms are warm about an hour early & Learning the rate per room from earlier mornings \\
+\bottomrule
+\end{longtable}
+
+\textbf{How the design was reviewed.} We used an AI assistant throughout, and
+kept a log of where its advice was wrong and how we caught it
+(\code{docs/review-log.md}). The pattern is worth stating: its first designs
+were plausible and broke rules it had not been shown. It put the sensor noise
+inside physics, shared files between processes and showed true \COtwo{} in the
+viewer, all three against the lectures; it treated occupancysim as something
+we could not change; and it proposed the stuck-counter rule that blames every
+healthy counter. Each was caught by checking the design against the course
+material or by asking what a healthy system looks like, before or after code
+was written. The parts of this design we are most sure of are the ones that
+were wrong once.
+
+\todo{Decide whether the paragraph above belongs in the report, and check
+what Canvas says about declaring AI use. This draft was itself written with
+the assistant, from your documents.}
+
+\textbf{With more time.} In order: vary the damper and room constants to see
+when anticipation starts to pay; give the predictor the timetable; measure
+command latency; a second seed; drift detection; and the \COtwo{}-based
+occupancy estimate the proposal started from.

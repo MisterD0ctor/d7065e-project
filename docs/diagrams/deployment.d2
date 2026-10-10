@@ -1,0 +1,55 @@
+# Deployment: where each process runs. Everything is on one laptop; the links
+# between the containers are in container.d2. Ports are published on
+# 127.0.0.1 only.
+vars: {
+  d2-config: {
+    layout-engine: elk
+  }
+}
+
+direction: down
+
+(** -> **)[*].style.font-size: 19
+
+classes: {
+  container: {
+    style: {fill: "#438DD5"; stroke: "#2E6295"; font-color: "#ffffff"; font-size: 20}
+  }
+  store: {
+    shape: cylinder
+    style: {fill: "#438DD5"; stroke: "#2E6295"; font-color: "#ffffff"; font-size: 20}
+  }
+  external: {
+    style: {fill: "#8C8C8C"; stroke: "#6E6E6E"; font-color: "#ffffff"; font-size: 20}
+  }
+  host: {
+    style: {fill: "#F2F2F2"; stroke: "#6E6E6E"; font-size: 20}
+  }
+}
+
+laptop: "Laptop: Linux, Docker Compose on rootless Podman" {
+  style: {stroke-dash: 4; fill: transparent; font-size: 22}
+
+  browser: "Web browser\nViewer, graphs, installer's form" {class: host}
+  tools: "Host tools [Go, shell]\ncmd/install, cmd/evaluate,\ndeploy/*.sh" {class: host}
+
+  net: "Compose network 10.90.0.0/22, one container per box unless stated" {
+    style: {stroke-dash: 2; fill: transparent; font-size: 20}
+    grid-columns: 4
+
+    buildsim: "buildsim\n:9090" {class: external}
+    occupancysim: "occupancysim\n:8081" {class: external}
+    mosquitto: "mosquitto\n:1883" {class: container}
+    physics: "physics" {class: container}
+    registry: "registry\n:8070\nvolume registry-data" {class: store}
+    storage: "storage\n:8090\nvolume storage-data" {class: store}
+    controller: "controller" {class: container}
+    viz: "viz\n:8060" {class: container}
+    sensors: "150 sensor devices\nco2-, temp-, occ-NNNN\n150 containers" {class: container}
+    actuators: "100 actuator devices\ndamper-, heat-NNNN\n100 containers" {class: container}
+    train: "train\nrun on demand\n(compose profile)" {class: container}
+  }
+
+  browser -> net: "HTTP on 127.0.0.1:\n9090, 8060, 8070"
+  tools -> net: "HTTP on 127.0.0.1:\n8070, 8081, 8090"
+}

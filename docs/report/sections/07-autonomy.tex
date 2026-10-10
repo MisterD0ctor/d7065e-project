@@ -1,0 +1,175 @@
+\section{7. Autonomous services and data pipeline}
+
+\subsection{7.1 The autonomous service}
+
+The controller is rule-based feedback control with a learned feed-forward
+term. It was chosen as the simplest thing that meets the requirements: the
+rules can be checked by reading them, a decision is a handful of arithmetic
+operations against a budget of one real second per model minute, and the
+learned part is small enough to inspect by eye.
+
+\textbf{Inputs.} Per room: the latest \COtwo{}, temperature and people count,
+each with its model time; the room's sizing and its actuators' addresses, from
+the registry; and, for the predictive policy, the occupancy profile from
+storage. The controller never sees the true state of a room.
+
+\textbf{Ventilation.} Each \COtwo{} reading produces one airflow command. Two
+terms are combined:
+\begin{align*}
+q_{\mathrm{reactive}}(C) &= q_{\mathrm{empty}} + \mathrm{clamp}\!\left(\frac{C - 600}{1000 - 600},\,0,\,1\right)\,(q_{\max} - q_{\mathrm{empty}}), \\
+q_{\mathrm{people}}(n) &= \min\bigl(7\,n + 0.35\,A,\; q_{\max}\bigr)\ \text{l/s}\quad\text{for } n \geq 0.5,\ \text{otherwise } 0.
+\end{align*}
+The reactive term rises from the unoccupied minimum at 600~ppm to the maximum
+at 1000~ppm. The people term is the workplace rule for $n$ people in a room of
+area $A$. The four policies differ only in how they use them:
+
+\begin{longtable}[]{@{}L{0.16\linewidth}L{0.76\linewidth}@{}}
+\toprule
+\textbf{Policy} & \textbf{Airflow asked for} \\
+\midrule
+\endhead
+\code{constant} & Design flow, always \\
+\code{reactive} & $q_{\mathrm{reactive}}(C)$ \\
+\code{predictive} & $\max\bigl(q_{\mathrm{reactive}}(C),\ q_{\mathrm{people}}(n)\bigr)$, where $n$ is the larger of the people counted now and the people the profile expects within the lead time \\
+\code{oracle} & The same, with $n$ the true peak occupancy within the lead time, replayed from a recorded run of the same dates \\
+\bottomrule
+\end{longtable}
+
+The lead time is the room's own \COtwo{} time constant at design flow, kept
+between 10 and 30 minutes: 12 minutes for a lecture room, 22 for the fika room
+1570, 30 for an office. The controller asks for as little as the policy wants
+and leaves the floors and the override to the damper.
+
+\textbf{Heating} is the same under every policy, so that the policies differ
+only in ventilation: 21~°C on weekdays 07--18 and an 18~°C setback otherwise,
+with an optimal start. The setback ends early enough for the room to be warm at
+07:00: the degrees still missing, divided by an assumed warm-up rate of
+1.5~K/h, plus 15 minutes for the valve and the sensor. A room that has started
+pre-heating keeps going until 07:00 even if it warms faster than assumed. It is
+the same idea as the predictive ventilation, applied to the slower process: the
+schedule is known, so act ahead of it.
+
+\textbf{The learned part} is a per-room occupancy profile by time of day
+(\code{internal/predict}), trained offline by the \code{train} job on the
+people counters' stored readings, never on the truth.
+\begin{itemize}
+\tightlist
+\item A weekday is cut into 96 slots of 15 minutes.
+\item A day's value for a slot is the 75th percentile of that slot's readings,
+  so a count has to show for about four of the fifteen minutes to register.
+  A gathering does; the counter's stray ``one person'' does not.
+\item The profile keeps, per slot, the 80~\% quantile of those values across
+  the training days. A day with no reading in a slot counts as empty.
+\item The forecast for ``the next lead time'' is the highest of the slots the
+  window touches. Below half a person it counts as an empty room.
+\end{itemize}
+The controller ventilates for a high quantile on purpose: a fan running a
+little early costs less than catching up on stale air. The profile was kept
+this simple because the evaluation shows the model is not what limits it
+(Section 11): it foresees the fika breaks, and no model could foresee lectures
+that land in a random room each day without the timetable as an input.
+
+\textbf{When the data is thin.} With no trained model the predictive policy
+acts as the reactive one and says so (\code{no\_forecast}). The controller
+looks for a newer model every 5 minutes real and keeps the last one it loaded
+if storage is unreachable.
+
+\textbf{When an input cannot be trusted.} Every decision record names the mode
+it was made in:
+
+\begin{longtable}[]{@{}L{0.22\linewidth}L{0.36\linewidth}L{0.34\linewidth}@{}}
+\toprule
+\textbf{Mode} & \textbf{When} & \textbf{What is commanded} \\
+\midrule
+\endhead
+\code{normal} & Every input is trusted & The policy's airflow; the heating schedule \\
+\code{no\_forecast} & No trained model yet & \code{predictive} acts as \code{reactive} \\
+\code{degraded\_occupancy} & The people count is older than 180~s, missing, or found stuck (\code{predictive} only; no other policy uses the count) & The airflow for the forecast and \COtwo{}, without the count \\
+\code{degraded\_co2} & The \COtwo{} sensor is found stuck & Design flow \\
+\code{degraded\_temp} & The temperature sensor is found stuck & 21~°C \\
+\bottomrule
+\end{longtable}
+
+A \emph{silent} \COtwo{} or temperature sensor needs no mode. Decisions are
+made per reading, so its room gets no commands, the actuator's last command
+expires after 300~s, and the actuator goes to design flow or 21~°C by itself.
+A \emph{stuck} sensor keeps reporting on time, so the controller has to notice
+(D-11):
+\begin{itemize}
+\tightlist
+\item \textbf{\COtwo{} and temperature} readings are noisy and rounded, so a
+  healthy sensor seldom repeats itself. The limit is the shortest run of
+  identical readings that a healthy 50-room building produces less than once
+  in 100 days: 5 readings for \COtwo{}, 12 for temperature. One different
+  reading and the sensor is trusted again.
+\item \textbf{The people counter} cannot be judged that way, because an empty
+  room really does read 0 for hours. It is checked against the room's \COtwo{}
+  with two bounds from the mass balance of Section 6 that hold for any
+  airflow. \COtwo{} cannot rise faster than the counted people can make it
+  rise; if it does, more people are there. And after $n$ people have been
+  there for a time $t$, \COtwo{} cannot be lower than they would give with the
+  damper fully open all that time; if it is, fewer are there. Both are tested
+  on five-minute means, with a margin of five standard errors, and allow a
+  person twice or half the nominal \COtwo{}.
+\end{itemize}
+
+\textbf{When the controller itself is wrong, slow or gone.} The damper enforces
+the limits on its own (D-6). It refuses a command outside the room's range. It
+never goes below the flow floor. It opens fully while the latest \COtwo{}
+reading is above 1100~ppm, taking that reading from the broker itself, not from
+the controller. And when no valid command has arrived for 300~s it returns to
+design flow. A dead controller therefore costs energy, not air quality.
+
+\textbf{Outputs.} One command per reading to the room's actuator (IF-8) and
+one decision record (IF-6) with the inputs, the mode, the target and what the
+actuator answered.
+
+\subsection{7.2 The data pipeline}
+
+\textbf{Ingestion.} A sensor device writes each reading to BuildSim and then
+publishes it on MQTT with its model time and a sequence number. The broker is
+a relay, not a buffer: it keeps nothing on disk and its clients do not use
+persistent sessions. A consumer that was away has missed what was sent, and
+the gap stays visible. We chose that over buffering because a ventilation
+decision made on a reading several minutes old is worse than no decision,
+which the actuators already handle.
+
+\textbf{Storage.} The storage service subscribes to all four record streams
+and appends each record to a JSONL file per run and stream
+(\code{<run>/obs.jsonl}, \code{truth.jsonl}, \code{decision.jsonl},
+\code{event.jsonl}). Nothing is aggregated and nothing is deleted: a run of
+five simulated weekdays is about 2.2 million records. One process owns the
+files and serves them over HTTP (IF-10), because processes may share no files.
+A time-series database was considered and rejected for this size (D-4). What
+the control loop needs from the recent past, the last few minutes per room, it
+keeps in its own memory.
+
+\textbf{Processing.} Three consumers turn stored records into something else,
+all off the control path. \code{train} reads a run's people counts and writes
+the profile. \code{cmd/evaluate} reads the truth of finished runs and produces
+every table in Section 11. viz keeps one point per room and model minute for a
+week in memory, about 16~MB for 50 rooms, because a page that redraws every two
+seconds cannot wait for storage to read a whole run; after a restart it reads
+the run so far from storage once.
+
+\textbf{Data quality.} A good decision on bad data is still a bad outcome, so
+each kind of bad data has a defined handling:
+
+\begin{longtable}[]{@{}L{0.20\linewidth}L{0.72\linewidth}@{}}
+\toprule
+\textbf{Problem} & \textbf{Handling} \\
+\midrule
+\endhead
+Duplicate & QoS~1 can deliver twice. The controller and storage drop a repeated \code{(sensor\_id, seq)} \\
+Stale & Judged by the reading's model time, never by its arrival: older than 180~s is not acted on \\
+Missing & No reading, no decision; the actuator's command expires and it falls back. The dashboard raises ``no reading'' \\
+Stuck & Found by the detector above and then treated like missing. The decision names the fault \\
+Malformed & Storage rejects the record, counts it and logs it. The count is visible at \code{/healthz} \\
+Gaps in the truth & Not filled. The evaluation counts the minutes it has \\
+Wrong run & Every record carries the run id of the process that wrote it, and storage files it by that. A single service restarted under another run id would file its records there, so the deploy scripts take the run id from the running controller \\
+\bottomrule
+\end{longtable}
+
+\textbf{Provenance.} Every number in Section 11 is produced by
+\code{cmd/evaluate} from the stored records of a named run, and a model
+records which runs and how many readings it was trained on.
