@@ -122,6 +122,13 @@ func (f *profileForecast) Load(ctx context.Context) (newName string, err error) 
 	return p.Name, nil
 }
 
+// Loaded reports whether a model has been fetched.
+func (f *profileForecast) Loaded() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.model != nil
+}
+
 func (f *profileForecast) Expected(room string, t time.Time, lead time.Duration) (float64, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

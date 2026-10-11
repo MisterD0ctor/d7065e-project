@@ -136,6 +136,11 @@ func main() {
 			c.reloadModel(ctx)
 		case <-refresh.C:
 			c.refreshPlants(ctx)
+			// Without a model yet (storage was still starting, or nobody has
+			// loaded one), look again now and not in five minutes.
+			if c.profile != nil && !c.profile.Loaded() {
+				c.reloadModel(ctx)
+			}
 		}
 	}
 }
