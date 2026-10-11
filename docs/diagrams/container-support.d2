@@ -1,0 +1,60 @@
+# C4 Level 2, view 2 of 2: commissioning (the registry) and the dashboard
+# (viz). The control loop is in container.d2; the boxes with the same names
+# are the same containers.
+vars: {
+  d2-config: {
+    layout-engine: elk
+  }
+}
+
+direction: down
+
+*.style.font-size: 26
+(** -> **)[*].style.font-size: 24
+
+installer: "Installer\n[Person]" {
+  shape: person
+  label.near: outside-top-center
+}
+manager: "Facility manager\n[Person]" {
+  shape: person
+  label.near: outside-top-center
+}
+
+bs: "BuildSim\n[Software System, from course]\nEquipment records; 3D viewer" {
+  style.font-size: 24
+}
+
+sys: "Ventilation Control  [System]" {
+  style.stroke-dash: 4
+  style.fill: transparent
+  *.style.font-size: 24
+
+  registry: "registry\n[Container: Go + SQLite]\nInstalled devices, rooms, sizing" {
+    shape: cylinder
+  }
+  sensors: "Sensor devices\n[One container each]"
+  actuators: "Actuator devices\n[One container each]"
+  controller: "controller\n[Container: Go]"
+  broker: "mosquitto\n[MQTT broker]" {
+    shape: queue
+  }
+  storage: "storage\n[Container: Go]" {
+    shape: cylinder
+  }
+  viz: "viz\n[Container: Go]\nDashboard: layers and alerts\nin the viewer; its own\npage with graphs"
+}
+
+installer -> sys.registry: "Registers id, kind,\nroom, capacity\n[REST / web form]"
+sys.sensors -> sys.registry: "Check in,\nlearn room [REST]"
+sys.actuators -> sys.registry: "Check in,\nadvertise\naddress [REST]"
+sys.controller -> sys.registry: "Rooms,\nactuator\naddresses\n[REST]"
+sys.registry -> bs: "The devices' equipment\nrecords [REST]"
+
+sys.broker -> sys.viz: "obs, decisions,\nstates, events [MQTT]"
+sys.viz -> sys.storage: "The run so far,\nafter a restart [REST]"
+sys.viz -> sys.registry: "Each room's\nsizing [REST]"
+sys.viz -> bs: "Room layers,\nalerts\n[REST]"
+
+manager -> sys.viz: "Graphs over time\n[web page]"
+manager -> bs: "3D view, alerts\n[web page]"

@@ -1,13 +1,31 @@
-vars: { d2-config: { layout-engine: elk } }
-direction: right
+# C4 Level 3: the components inside the controller.
+vars: {
+  d2-config: {
+    layout-engine: elk
+  }
+}
 
-broker: "MQTT broker\nobs/#" { shape: queue }
-registry: "registry" { shape: cylinder }
-storage: "storage\n(latest model)" { shape: cylinder }
+direction: down
+
+*.style.font-size: 20
+(** -> **)[*].style.font-size: 20
+
+broker: "MQTT broker\nobs/#" {
+  shape: queue
+}
+registry: "registry" {
+  shape: cylinder
+}
+storage: "storage\n(latest model)" {
+  shape: cylinder
+}
 actuators: "Actuator devices"
 
 ctl: "controller  [Container: Go]" {
   style.fill: transparent
+  style.font-size: 22
+  *.style.font-size: 20
+
   intake: "Intake\nparse, drop duplicates\nand stale readings"
   health: "Sensor check\n(internal/stuck)\nrepeating sensors; counter\nagainst the CO₂ balance"
   forecast: "Forecast\n(internal/predict)\nper-room profile, or the\noracle's recording"
@@ -19,9 +37,9 @@ ctl: "controller  [Container: Go]" {
 
 broker -> ctl.intake: readings
 ctl.intake -> ctl.health
-ctl.health -> ctl.policy: "trusted CO₂, count"
-ctl.health -> ctl.heating: "trusted temperature"
-ctl.forecast -> ctl.policy: "people within lead time"
+ctl.health -> ctl.policy: "trusted CO₂,\ncount"
+ctl.health -> ctl.heating: "trusted\ntemperature"
+ctl.forecast -> ctl.policy: "people within\nlead time"
 storage -> ctl.forecast: model
 registry -> ctl.plant
 ctl.plant -> ctl.policy: sizing

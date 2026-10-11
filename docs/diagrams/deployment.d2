@@ -1,29 +1,50 @@
-vars: { d2-config: { layout-engine: elk } }
-direction: right
+# Deployment: where each process runs, and where it would run in a building.
+vars: {
+  d2-config: {
+    layout-engine: elk
+  }
+}
+
+direction: down
+
+*.style.font-size: 24
+(** -> **)[*].style.font-size: 24
+
+browser: "Browser" {
+  shape: person
+  label.near: outside-top-center
+}
+
 host: "One laptop: rootless Podman, one compose network (10.90.0.0/22)" {
   style.fill: transparent
-  building: "Simulated building" {
-    bs: "buildsim  :9090"
-    occ: "occupancysim  :8081"
-    physics: "physics"
-  }
-  edge: "Edge: one container per device (251)" {
-    sensors: "150 sensors + 1 clock"
-    actuators: "100 actuators  :8080 each"
-  }
+  *.style.font-size: 24
+
   server: "Building server" {
+    *.style.font-size: 24
     mosquitto: "mosquitto  :1883"
     controller: controller
     registry: "registry  :8070\n(volume: SQLite)"
     storage: "storage  :8090\n(volume: JSONL per run)"
     viz: "viz  :8060"
   }
+  edge: "Edge: one container per device (251)" {
+    *.style.font-size: 24
+    sensors: "150 sensors + 1 clock"
+    actuators: "100 actuators\n:8080 each"
+  }
   eval: "Evaluation" {
+    *.style.font-size: 24
     truthlog: truthlog
     train: "train (batch)"
   }
+  building: "Simulated building" {
+    *.style.font-size: 24
+    bs: "buildsim  :9090"
+    occ: "occupancysim  :8081"
+    physics: "physics"
+  }
 }
-browser: "Browser" { shape: person }
+
 browser -> host.server.viz: graphs
 browser -> host.building.bs: "3D viewer"
 browser -> host.server.registry: "installer's form"

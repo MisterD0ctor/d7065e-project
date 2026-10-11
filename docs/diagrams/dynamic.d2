@@ -1,21 +1,25 @@
+# C4 dynamic diagram: a lecture room fills (room A1519, minute 10:07).
 shape: sequence_diagram
-occ: occupancysim
-bs: BuildSim
-phys: physics
-clock: clock device
-sensor: "CO₂ sensor and\ncounter, room A1519"
-ctl: controller
-damper: "damper, A1519"
 
-occ -> bs: "1. minute 10:07: 53 people in A1519 (clock record)"
-phys -> bs: "2. reads the record and the damper's state"
-phys -> bs: "3. writes true CO₂ and head-count, then the time 10:07"
+(* -> *)[*].style.font-size: 20
+
+occ: occupancysim {style.font-size: 21}
+bs: BuildSim {style.font-size: 21}
+phys: physics {style.font-size: 21}
+clock: "clock\ndevice" {style.font-size: 21}
+sensor: "CO₂ sensor\nand counter,\nroom A1519" {style.font-size: 21}
+ctl: controller {style.font-size: 21}
+damper: "damper,\nA1519" {style.font-size: 21}
+
+occ -> bs: "1. minute 10:07:\n53 people in\nA1519 (clock\nrecord)"
+phys -> bs: "2. reads the\nrecord and the\ndamper's state"
+phys -> bs: "3. writes true\nCO₂ and head-\ncount, then the\ntime 10:07"
 clock -> bs: "4. reads the time"
-clock -> sensor: "5. time/model 10:07 (MQTT)"
+clock -> sensor: "5. time/model\n10:07 (MQTT)"
 sensor -> bs: "6. each reads its own value"
-sensor -> ctl: "7. obs: CO₂ reading and 53 counted, each with its noise (MQTT)"
-ctl -> ctl: "8. predictive: max(flow for CO₂, flow for 53 people)"
-ctl -> damper: "9. command 408 l/s, TTL 300 s (REST)"
-damper -> ctl: "10. 202 accepted"
+sensor -> ctl: "7. obs: CO₂\nreading and 53\ncounted, each\nwith its noise\n(MQTT)"
+ctl -> ctl: "8. predictive:\nmax(flow for\nCO₂, flow for\n53 people)"
+ctl -> damper: "9. command\n408 l/s,\nTTL 300 s\n(REST)"
+damper -> ctl: "10. 202\naccepted"
 damper -> bs: "11. reached state, +10 % of maximum per minute"
-phys -> bs: "12. next minute: reads the new airflow; CO₂ rises more slowly"
+phys -> bs: "12. next minute:\nreads the new\nairflow; CO₂\nrises more\nslowly"

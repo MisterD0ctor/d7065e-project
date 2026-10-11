@@ -1,16 +1,22 @@
+# C4 Level 1: system context.
 vars: {
   d2-config: {
     layout-engine: elk
   }
 }
 
-direction: right
+direction: down
+
+*.style.font-size: 22
+(* -> *)[*].style.font-size: 20
 
 manager: Facility Manager {
   shape: person
+  label.near: outside-top-center
 }
 installer: Installer {
   shape: person
+  label.near: outside-top-center
 }
 control: Ventilation Control
 buildsim: BuildSim {
@@ -24,7 +30,7 @@ physics: "Physical model\n(ours)" {
 }
 
 manager -> control: monitors
-installer -> control: registers devices
-control -> buildsim: observes and acts through its sensor and actuator devices
-occupancysim -> buildsim: publishes people and the model clock
-physics -> buildsim: writes the true sensor values, reads the actuators' states
+installer -> control: "registers\ndevices"
+control -> buildsim: "observes and acts through\nits sensor and actuator devices"
+occupancysim -> buildsim: "publishes people and\nthe model clock"
+physics -> buildsim: "writes the true sensor values,\nreads the actuators' states"

@@ -77,6 +77,13 @@
 \captionsetup{font=small,labelfont=bf,skip=4pt}
 \setlength{\LTpre}{4pt}\setlength{\LTpost}{6pt}
 
+% A figure centred on the page at a width that may exceed the text block. The
+% large diagrams need it for their labels to print at a readable size.
+\newcommand{\widefigure}[2][1.12]{\par\noindent\makebox[\linewidth][c]{\includegraphics[width=#1\linewidth]{#2}}\par}
+% The same with a line of text under it that stays on the figure's page.
+\newcommand{\widefigurewithnote}[3][1.12]{\par\noindent\begin{minipage}{\linewidth}\centering
+  \makebox[\linewidth][c]{\includegraphics[width=#1\linewidth]{#2}}\\[4pt]{\small #3}\end{minipage}\par}
+
 \begin{document}
 
 \begin{center}
@@ -172,7 +179,7 @@ NFR-8 & One baseline over five simulated weekdays in $\leq$ 2.5\,h & T-26 \\
 
 \subsection{4.1 Context diagram (C4 Level 1)}
 
-\begin{center}\includegraphics[width=0.78\linewidth]{figures/context.pdf}\end{center}
+\begin{center}\includegraphics[width=0.76\linewidth]{figures/context.png}\end{center}
 
 The simulated building is three things: BuildSim (course), the occupancy simulator
 (course example, modified) and our physical model. They are outside the control system
@@ -182,7 +189,14 @@ watches the dashboard; an installer registers devices.
 
 \subsection{4.2 Container diagram (C4 Level 2)}
 
-\begin{center}\includegraphics[height=0.60\textheight]{figures/container.pdf}\end{center}
+The container level is drawn as two views, because with every link in one picture the
+labels are too small to read on a page. The first is the control loop and the data path.
+The second is commissioning and the dashboard; boxes with the same name are the same
+containers. A two-way arrow names both directions.
+
+\widefigurewithnote{figures/container.png}{\textbf{View 1:} the control loop and the data path.}
+
+\widefigurewithnote{figures/container-support.png}{\textbf{View 2:} commissioning and the dashboard.}
 
 Every sensor and actuator is its own container (251 devices), so one dead device affects
 one room. The occupancy simulator and the physical model talk to BuildSim and to nothing
@@ -198,7 +212,7 @@ read, for the evaluation.
 
 \subsection{4.3 Component diagram (C4 Level 3): the controller}
 
-\begin{center}\includegraphics[width=\linewidth]{figures/component.pdf}\end{center}
+\begin{center}\includegraphics[width=\linewidth]{figures/component.png}\end{center}
 
 Validation, forecast and policy sit in one process because they are one critical path
 with no reason to be restarted separately. Readings pass a sensor check before the policy
@@ -321,7 +335,7 @@ from storage after a restart.
 
 \subsection{8.1 Key scenario: a lecture room fills}
 
-\begin{center}\includegraphics[width=0.92\linewidth]{figures/dynamic.pdf}\end{center}
+\widefigure[1.0]{figures/dynamic.png}
 
 The order of steps 3 to 6 is the point: the physical model writes the minute to the
 clock device \emph{after} that minute's values, and sensors sample when the clock shows a
@@ -330,7 +344,7 @@ delivered 120 of 120 readings (T-42).
 
 \subsection{8.2 Process lifecycle: a damper}
 
-\begin{center}\includegraphics[width=\linewidth]{figures/state.pdf}\end{center}
+\begin{center}\includegraphics[width=0.52\linewidth]{figures/state.png}\end{center}
 
 A damper without a valid command is at design flow. Commands expire after 300 model
 seconds, so a silent controller, sensor or broker returns the room to design flow
@@ -339,7 +353,7 @@ last known speed so that the expiry still happens.
 
 \section{9. Deployment and component view}
 
-\begin{center}\includegraphics[width=0.9\linewidth]{figures/deployment.pdf}\end{center}
+\widefigure{figures/deployment.png}
 
 Everything runs as containers on one laptop under one compose network, generated from
 the installation list. In a building, each device container would be a device, and the
@@ -431,13 +445,20 @@ not.
 
 \section{12. Dashboard}
 
-\begin{center}\includegraphics[width=0.74\linewidth]{figures/dashboard-room.png}\end{center}
-
 The dashboard is one process, viz, with two faces. In the BuildSim 3D viewer it
 publishes five room layers (\cotwo, people counted, people expected, airflow as a share
 of the room's maximum, temperature) and the current alerts. On its own page
-(port 8060) it shows the building and each room over time, up to a week back. The
-figure is a room whose \cotwo{} sensor was frozen at 09:20: the flat reading, the alert
+(port 8060) it shows the building and each room over time, up to a week back.
+
+\begin{center}\includegraphics[width=\linewidth]{figures/3d-view.png}\end{center}
+
+The first figure is the viewer on level 0 with the \cotwo{} layer: each room we
+instrument is coloured by its sensor's latest reading, on a scale from 400 to
+1600\,ppm with grey at the 1000\,ppm limit, so blue is air well under the limit.
+
+\begin{center}\includegraphics[width=\linewidth]{figures/dashboard-room.png}\end{center}
+
+The second figure is a room whose \cotwo{} sensor was frozen at 09:20: the flat reading, the alert
 period shaded, the damper held at design flow while up to 12 people came and went, and
 its rate-limited return when the sensor was repaired. Everything shown arrived on MQTT
 from a sensor, the controller or an actuator: the dashboard shows the building as the
