@@ -90,6 +90,15 @@ POLICY=predictive docker compose up -d controller                     # uses the
 POLICY=oracle ORACLE_RUN=eval-reactive docker compose up -d controller # replay that run's true occupancy
 ```
 
+The model used in the report is in the repository, so a fresh machine does
+not have to simulate a training week first. Load it into storage once the
+stack is up:
+
+```
+curl -X PUT localhost:8090/models/profile-train-week-v4 \
+     -H 'Content-Type: application/json' --data-binary @deploy/models/profile-train-week-v4.json
+```
+
 The oracle must replay a run of the **same seed and dates**. Storage refuses
 the live run's truth, so it can only ever read a finished run.
 
