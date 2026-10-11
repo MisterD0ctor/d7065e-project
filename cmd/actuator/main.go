@@ -3,8 +3,14 @@
 // at boot it checks in with the registry (IF-12) to learn its room and the
 // room's ventilation sizing, and tells the registry where to send commands.
 // It accepts commands over HTTP (IF-8), enforces the safety limits itself
-// (D-6), and writes the state it has reached to BuildSim (IF-9), where
-// physics reads it back.
+// (D-6), and writes the state it has reached to BuildSim (IF-9), where the
+// physical model reads it back. It also publishes that state on MQTT for the
+// dashboard.
+//
+// It writes to BuildSim and reads nothing from it. The time comes from the
+// building's clock device and the CO₂ for the override from the room's CO₂
+// sensor, both over MQTT: sensors are the control system's only way to what
+// is in BuildSim.
 package main
 
 import (
@@ -22,7 +28,6 @@ import (
 
 	"github.com/MisterD0ctor/d7065e-project/internal/actuator"
 	"github.com/MisterD0ctor/d7065e-project/internal/buildsim"
-	"github.com/MisterD0ctor/d7065e-project/internal/clock"
 	"github.com/MisterD0ctor/d7065e-project/internal/devreg"
 	"github.com/MisterD0ctor/d7065e-project/internal/env"
 	"github.com/MisterD0ctor/d7065e-project/internal/mqttx"
@@ -41,16 +46,18 @@ type device struct {
 	logic    *actuator.Device
 	reg      *devreg.Client
 	bs       *buildsim.Client
-	clk      *clock.Client // fallback when the model time stops arriving on MQTT
 	mq       *mqttx.Client
 	runID    string
 	written  string // last state written to BuildSim
 
-	timeSilence mqttx.Silence
-	co2Silence  mqttx.Silence
+	// One tick at a time: the periodic one, and one before each command.
+	ticking     sync.Mutex
+	published   string    // last state published on MQTT
+	publishedAt time.Time // model time of that
+	freeRunning bool      // the time signal is lost, to log it once
 
 	mu      sync.Mutex
-	now     time.Time // latest model time
+	clock   timekeeper
 	co2     float64
 	haveCO2 bool
 }
@@ -86,7 +93,6 @@ func main() {
 		logic:    actuator.New(kind, map[rooms.Key]sizing.Room{room: dev.Size}),
 		reg:      reg,
 		bs:       buildsim.New(env.String("BUILDSIM_URL", "http://buildsim:9090")),
-		clk:      clock.New(env.String("CLOCK_URL", "http://occupancysim:8081")),
 		mq:       mqttx.Connect(id),
 		runID:    env.String("RUN_ID", "dev"),
 	}
@@ -133,9 +139,8 @@ func (d *device) onTime(_ string, payload []byte) {
 	if err != nil {
 		return
 	}
-	d.timeSilence.Arrived(time.Now())
 	d.mu.Lock()
-	d.now = t
+	d.clock.set(t, m.Factor, time.Now())
 	d.mu.Unlock()
 }
 
@@ -144,7 +149,6 @@ func (d *device) onCO2(_ string, payload []byte) {
 	if json.Unmarshal(payload, &o) != nil {
 		return
 	}
-	d.co2Silence.Arrived(time.Now())
 	d.mu.Lock()
 	d.co2, d.haveCO2 = o.Value, true
 	d.mu.Unlock()
@@ -157,6 +161,11 @@ func (d *device) handleCommand(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"reason":"body is not a command"}`, http.StatusUnprocessableEntity)
 		return
 	}
+	// Bring the device up to the present first: a command's TTL is judged
+	// against the device's time, and that must not be a second old (which is
+	// a model minute or two) or still be the estimate from before the time
+	// signal came back.
+	d.tick(r.Context())
 	res := d.logic.Handle(k, c)
 	if res.Status != http.StatusAccepted && !res.Duplicate {
 		d.event(actuator.Event{Room: k, Kind: "rejected", Detail: fmt.Sprintf("%s (cmd %s)", res.Reason, c.CmdID)})
@@ -167,20 +176,44 @@ func (d *device) handleCommand(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d *device) tick(ctx context.Context) {
-	now, ok := d.modelTime(ctx)
-	if !ok {
-		// Without the time no TTL can expire; keep the current target.
+	d.ticking.Lock()
+	defer d.ticking.Unlock()
+	d.mu.Lock()
+	now, known, lost := d.clock.at(time.Now())
+	var co2 map[rooms.Key]float64
+	if d.haveCO2 {
+		co2 = map[rooms.Key]float64{d.room: d.co2}
+	}
+	d.mu.Unlock()
+	if !known {
+		// Without ever having heard the time, no TTL can expire; keep the
+		// starting state.
 		return
 	}
-	var co2 map[rooms.Key]float64
-	if v, ok := d.latestCO2(ctx); ok {
-		co2 = map[rooms.Key]float64{d.room: v}
+	if lost != d.freeRunning {
+		if d.freeRunning = lost; lost {
+			log.Printf("the building's time signal is gone; keeping time from %s on my own", msg.FormatTime(now))
+		} else {
+			log.Printf("the building's time signal is back")
+		}
 	}
 	reached, events := d.logic.Tick(now, co2)
 	for _, e := range events {
 		d.event(e)
 	}
-	state := strconv.FormatFloat(reached[d.room], 'f', 1, 64)
+	value := reached[d.room]
+	state := strconv.FormatFloat(value, 'f', 1, 64)
+
+	// For the dashboard: on every change, and once a model minute so that a
+	// constant state is still seen to be alive.
+	if state != d.published || now.Sub(d.publishedAt) >= time.Minute || now.Before(d.publishedAt) {
+		d.mq.Publish(msg.StateTopic(d.room, d.logic.Kind), msg.State{
+			RunID: d.runID, Room: d.room.String(), ModelTime: msg.FormatTime(now),
+			Actuator: d.logic.Kind, Value: value, Unit: d.logic.Unit(),
+		})
+		d.published, d.publishedAt = state, now
+	}
+
 	if state == d.written {
 		return
 	}
@@ -195,49 +228,10 @@ func (d *device) tick(ctx context.Context) {
 	}
 }
 
-// modelTime comes from physics over MQTT; if that goes quiet, the device asks
-// occupancysim directly.
-func (d *device) modelTime(ctx context.Context) (time.Time, bool) {
-	if !d.timeSilence.Silent(time.Now()) {
-		d.mu.Lock()
-		defer d.mu.Unlock()
-		return d.now, !d.now.IsZero()
-	}
-	r, err := d.clk.Now(ctx)
-	if err != nil {
-		log.Printf("clock: %v", err)
-		return time.Time{}, false
-	}
-	return r.Time, true
-}
-
-// latestCO2 is the damper's input for the override: from MQTT normally, from
-// BuildSim when MQTT is silent. It doesn't involve the controller (D-6).
-func (d *device) latestCO2(ctx context.Context) (float64, bool) {
-	if d.logic.Kind != rooms.Damper {
-		return 0, false
-	}
-	if !d.co2Silence.Silent(time.Now()) {
-		d.mu.Lock()
-		defer d.mu.Unlock()
-		return d.co2, d.haveCO2
-	}
-	sensors, err := d.reg.List(ctx, registry.Filter{Kind: rooms.CO2, Room: d.room.String(), Status: "active"})
-	if err != nil || len(sensors) == 0 {
-		return 0, false
-	}
-	s, err := d.bs.SensorValue(ctx, registry.SensorID(sensors[0].ID))
-	if err != nil {
-		return 0, false
-	}
-	v, err := strconv.ParseFloat(s.Value, 64)
-	return v, err == nil
-}
-
 func (d *device) event(e actuator.Event) {
 	log.Printf("event %s %s: %s", e.Room, e.Kind, e.Detail)
 	d.mu.Lock()
-	now := d.now
+	now, _, _ := d.clock.at(time.Now())
 	d.mu.Unlock()
 	d.mq.Publish(msg.EventTopic(e.Room), msg.Event{
 		RunID: d.runID, Room: e.Room.String(), ModelTime: msg.FormatTime(now),

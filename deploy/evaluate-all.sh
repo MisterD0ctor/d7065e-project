@@ -39,5 +39,5 @@ RUN_ID=idle POLICY=reactive docker compose up -d >/dev/null 2>&1
 mkdir -p results
 go run ./cmd/evaluate \
   -runs "eval-constant$suffix,eval-reactive$suffix,eval-predictive$suffix,eval-oracle$suffix" \
-  -accuracy-run "eval-reactive$suffix" -out results | tee "results/evaluation$suffix.md"
+  -accuracy-run "eval-reactive$suffix" -stuck-check -out results | tee "results/evaluation$suffix.md"
 echo "$(date +%T) evaluation finished"

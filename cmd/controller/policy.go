@@ -16,7 +16,7 @@ import (
 
 // The four policies of FR-9. Everything else is identical between them.
 const (
-	Constant   = "constant"   // design flow, always
+	Constant   = "constant"   // design flow on a time schedule, whoever is there
 	Reactive   = "reactive"   // flow follows measured CO₂
 	Predictive = "predictive" // reactive, plus flow for the people the profile expects
 	Oracle     = "oracle"     // like predictive, but knows the true future occupancy
@@ -57,10 +57,19 @@ func peopleFlow(size sizing.Room, n float64) float64 {
 // airflow proposes a flow for one room. It asks for as little as the policy
 // wants and leaves the floors and the CO₂ override to the actuator (D-6).
 // people is the number to ventilate for: now and within the lead time.
-func airflow(policy string, size sizing.Room, co2, people float64) float64 {
+//
+// Constant is the building without any of this: a time clock. Design flow
+// in the occupied hours (weekdays 07 to 18), the unoccupied minimum
+// otherwise, and no regard for CO₂ or people. It is the baseline the others
+// are measured against, and a fairer one than design flow around the clock,
+// which no building runs at night.
+func airflow(policy string, size sizing.Room, co2, people float64, t time.Time) float64 {
 	switch policy {
 	case Constant:
-		return size.Design
+		if sizing.OccupiedHours(t) {
+			return size.Design
+		}
+		return size.Empty
 	case Predictive, Oracle:
 		return max(reactiveFlow(size, co2), peopleFlow(size, people))
 	default:

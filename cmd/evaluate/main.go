@@ -42,17 +42,16 @@ var client = &http.Client{Timeout: 10 * time.Minute}
 
 func main() {
 	storage := flag.String("storage", "http://127.0.0.1:8090", "storage URL")
-	occsim := flag.String("occupancysim", "http://127.0.0.1:8081", "occupancysim URL, for room roles")
 	runs := flag.String("runs", "", "comma-separated runs to compare")
 	accRun := flag.String("accuracy-run", "", "run whose occupancy readings test the predictor (not a training run)")
 	out := flag.String("out", "results", "directory for CSV output")
 	stuckToo := flag.Bool("stuck-check", false, "also replay each run's readings through the stuck-sensor detector")
-	reg := flag.String("registry", "http://127.0.0.1:8070", "registry URL, for room sizes (-stuck-check)")
+	reg := flag.String("registry", "http://127.0.0.1:8070", "registry URL, for the rooms' sizes and roles")
 	flag.Parse()
 	if *runs == "" {
 		log.Fatal("-runs is required")
 	}
-	roles, err := roomRoles(*occsim)
+	roles, err := roomRoles(*reg)
 	if err != nil {
 		log.Printf("room roles: %v (reporting all rooms together)", err)
 	}
@@ -471,7 +470,7 @@ func stuckCheck(storage, registryURL string, runs []string) error {
 	return nil
 }
 
-// ---- storage and occupancysim ----
+// ---- storage and the registry ----
 
 func stream(storage, run, kind string, each func([]byte)) error {
 	u := fmt.Sprintf("%s/history?run=%s&kind=%s", storage, url.QueryEscape(run), kind)
@@ -504,27 +503,30 @@ func latestModel(storage string) (predict.Profile, error) {
 	return p, json.NewDecoder(resp.Body).Decode(&p)
 }
 
-// roomRoles asks occupancysim which rooms are offices, lecture rooms and
-// fika rooms, keyed "<level>/<room>".
-func roomRoles(occsim string) (map[string]string, error) {
-	resp, err := client.Get(occsim + "/api/state")
+// roomRoles sorts the rooms into offices, lecture rooms and fika rooms from
+// what the installer registered: a room for one person is an office, and of
+// the larger ones a lecture room seats a person per 2 m² where a fika room
+// has 4 m² each. (The evaluator, like everything else of ours, doesn't call
+// occupancysim.)
+func roomRoles(registryURL string) (map[string]string, error) {
+	devs, err := devreg.New(registryURL).List(context.Background(), registry.Filter{Kind: rooms.Damper})
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
-	var st struct {
-		Sim struct {
-			Rooms []struct {
-				Name, Level, Role string
-			} `json:"rooms"`
-		} `json:"sim"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&st); err != nil {
-		return nil, err
-	}
 	roles := map[string]string{}
-	for _, r := range st.Sim.Rooms {
-		roles[r.Level+"/"+r.Name] = r.Role
+	for _, d := range devs {
+		roles[d.Room] = roleOf(d.Size)
 	}
 	return roles, nil
+}
+
+func roleOf(size sizing.Room) string {
+	switch {
+	case size.Capacity <= 1:
+		return "office"
+	case size.AreaM2/float64(size.Capacity) < 3:
+		return "lecture"
+	default:
+		return "fika"
+	}
 }

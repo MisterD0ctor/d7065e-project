@@ -14,9 +14,10 @@ import (
 // next, with the occupancy occupancysim recorded for those minutes. The truth
 // is therefore the same function of model time in every run of a day (NFR-7):
 // when physics happens to tick only decides when a minute is computed, not
-// what it contains. (The first evaluation sampled BuildSim's occupancy, which
-// has no time attached and is refreshed on a wall-clock schedule, and two runs
-// of one day disagreed in ~0.3 % of samples.)
+// what it contains. (The first evaluation sampled BuildSim's occupancy
+// collection, which has no time attached and is refreshed on a wall-clock
+// schedule, and two runs of one day disagreed in ~0.3 % of samples. The
+// per-minute record occupancysim now also keeps in BuildSim is what fixed it.)
 type world struct {
 	keys   []rooms.Key
 	models map[rooms.Key]*roommodel.Room
@@ -51,7 +52,7 @@ func newWorld(keys []rooms.Key, sizes map[rooms.Key]sizing.Room) *world {
 // occupancy at m then takes over. The very first minute, or one that is not
 // later than the last (the model clock was moved back), only sets the
 // starting point. A gap of several minutes, which happens when physics falls
-// more than occupancysim's log behind, is stepped in one go.
+// more than the clock's record behind, is stepped in one go.
 func (w *world) advance(m clock.Minute) {
 	if !w.last.IsZero() && m.Time.After(w.last) {
 		d := m.Time.Sub(w.last)
@@ -70,11 +71,12 @@ func (w *world) advance(m clock.Minute) {
 	w.last = m.Time
 }
 
-// truth is one room's true state at w.last (IF-5).
-func (w *world) truth(runID string, k rooms.Key) msg.Truth {
+// truth is one room's true state at w.last (IF-5). The run id is the truth
+// recorder's to add: the physical model doesn't know about runs.
+func (w *world) truth(k rooms.Key) msg.Truth {
 	m, a, o := w.models[k], w.act[k], w.occ[k]
 	return msg.Truth{
-		RunID: runID, Room: k.String(), ModelTime: msg.FormatTime(w.last),
+		Room: k.String(), ModelTime: msg.FormatTime(w.last),
 		CO2: m.CO2, Temp: m.Temp, Occupancy: o.Occupants, Guards: o.Guards,
 		Airflow: a.AirflowLs, Setpoint: a.Setpoint,
 		FanW: m.FanW, AHUHeatW: m.AHUHeatW, RadiatorW: m.RadiatorW,

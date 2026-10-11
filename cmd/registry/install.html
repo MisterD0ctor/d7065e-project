@@ -41,12 +41,16 @@
         <option value="co2">CO₂ sensor</option>
         <option value="temp">Temperature sensor</option>
         <option value="occupancy">People counter</option>
+        <option value="clock">Clock</option>
         <option value="damper">Ventilation damper</option>
         <option value="heating">Radiator valve</option>
       </select>
     </label>
     <label>Room (level/room)
       <input name="room" required placeholder="level0/1570">
+    </label>
+    <label>People the room is designed for (first device in a room; leave empty to estimate from the area)
+      <input name="capacity" type="number" min="1" step="1" placeholder="25">
     </label>
     <label>Installed by
       <input name="installed_by" required placeholder="your name">
@@ -86,6 +90,7 @@ async function load() {
 form.addEventListener('submit', async e => {
   e.preventDefault();
   const body = Object.fromEntries(new FormData(form));
+  if (body.capacity) body.capacity = Number(body.capacity); else delete body.capacity;
   const res = await fetch('devices', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const data = await res.json();
   result.className = res.ok ? 'ok' : 'err';

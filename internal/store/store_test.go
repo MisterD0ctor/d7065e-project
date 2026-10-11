@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func obs(seq int, t, room, kind string) []byte {
@@ -51,6 +52,26 @@ func TestDeduplicatesObservations(t *testing.T) {
 	}
 	if n := len(lines(t, s, Query{Run: "r1", Kind: "co2"})); n != 1 {
 		t.Fatalf("%d records, want 1", n)
+	}
+}
+
+// A reading stamped later than the ones that follow must not make them look
+// like duplicates. It did: a sensor that started while the building's clock
+// still showed the previous run's last minute reported once with that time,
+// and storage then threw away the whole run's readings from that sensor.
+func TestALaterReadingDoesNotBlockEarlierOnes(t *testing.T) {
+	s := open(t)
+	if ok, err := s.Append("obs", obs(900000, "2026-09-26T00:00:00Z", "level0/1570", "co2")); !ok || err != nil {
+		t.Fatalf("the stray reading: %v %v", ok, err)
+	}
+	for seq := 1; seq <= 50; seq++ {
+		at := time.Date(2026, 9, 21, 0, seq, 0, 0, time.UTC).Format(time.RFC3339)
+		if ok, err := s.Append("obs", obs(seq, at, "level0/1570", "co2")); !ok || err != nil {
+			t.Fatalf("reading %d of the run was not stored: %v %v", seq, ok, err)
+		}
+	}
+	if n := len(lines(t, s, Query{Run: "r1", Kind: "co2"})); n != 51 {
+		t.Fatalf("%d records, want 51", n)
 	}
 }
 

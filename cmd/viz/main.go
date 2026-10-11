@@ -1,5 +1,5 @@
 // Command viz is the dashboard (D-8, FR-10). It follows the observations,
-// decisions and actuator events on MQTT and shows the building in two places
+// decisions, actuator states and events on MQTT and shows the building in two places
 // (IF-11). In the BuildSim viewer: a heatmap layer per measure and the
 // current alerts. On its own web page: graphs of each room and of the whole
 // building over time, which the viewer has no place for.
@@ -7,6 +7,8 @@
 // It is the only writer of room layers and alerts: BuildSim keeps one
 // collection of each, and a second writer would erase the first. The viewer
 // itself is provided infrastructure; what is ours is what gets mapped into it.
+// viz writes to BuildSim and reads nothing from it: all it knows came over
+// MQTT from the sensors, the controller and the actuators.
 package main
 
 import (
@@ -14,9 +16,7 @@ import (
 	"encoding/json"
 	"log"
 	"os/signal"
-	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -46,9 +46,6 @@ type viz struct {
 	bs    *buildsim.Client
 	reg   *devreg.Client
 
-	mu     sync.Mutex
-	levels map[string]bool // the floors that have rooms, to read their equipment
-
 	lastAlerts   string    // JSON of the alerts last sent
 	alertsSentAt time.Time // real time
 	failing      bool      // the last write to BuildSim failed
@@ -59,10 +56,9 @@ func main() {
 	defer stop()
 
 	v := &viz{
-		board:  dashboard.New(),
-		bs:     buildsim.New(env.String("BUILDSIM_URL", "http://buildsim:9090")),
-		reg:    devreg.New(env.String("REGISTRY_URL", "http://registry:8080")),
-		levels: map[string]bool{},
+		board: dashboard.New(),
+		bs:    buildsim.New(env.String("BUILDSIM_URL", "http://buildsim:9090")),
+		reg:   devreg.New(env.String("REGISTRY_URL", "http://registry:8080")),
 	}
 	v.refreshRooms(ctx)
 	go v.serve(ctx, ":"+env.String("PORT", "8080"))
@@ -78,6 +74,12 @@ func main() {
 		var d msg.Decision
 		if json.Unmarshal(p, &d) == nil {
 			v.board.Decide(d)
+		}
+	})
+	mq.Subscribe("state/#", func(_ string, p []byte) {
+		var st msg.State
+		if json.Unmarshal(p, &st) == nil {
+			v.board.State(st)
 		}
 	})
 	mq.Subscribe("event/#", func(_ string, p []byte) {
@@ -119,50 +121,17 @@ func (v *viz) refreshRooms(ctx context.Context) {
 		return
 	}
 	sizes := map[rooms.Key]sizing.Room{}
-	levels := map[string]bool{}
 	for _, d := range devs {
 		if k, err := rooms.Parse(d.Room); err == nil && d.Size.Max > 0 {
 			sizes[k] = d.Size
-			levels[k.Level] = true
 		}
 	}
 	v.board.SetRooms(sizes)
-	v.mu.Lock()
-	v.levels = levels
-	v.mu.Unlock()
-}
-
-// airflow reads what each room's damper has reached, in l/s, from BuildSim,
-// where the dampers report it. It returns nil if nothing could be read.
-func (v *viz) airflow(ctx context.Context) map[rooms.Key]float64 {
-	v.mu.Lock()
-	levels := v.levels
-	v.mu.Unlock()
-	fan := rooms.Actuators[rooms.Damper].EquipmentType
-	var out map[rooms.Key]float64
-	for level := range levels {
-		eq, err := v.bs.Equipment(ctx, level)
-		if err != nil {
-			continue // this floor is left out this round
-		}
-		if out == nil {
-			out = map[rooms.Key]float64{}
-		}
-		for _, e := range eq {
-			if e.Type != fan || len(e.Actuators) == 0 {
-				continue
-			}
-			if flow, err := strconv.ParseFloat(e.Actuators[0].State, 64); err == nil {
-				out[rooms.Key{Level: e.Level, Name: e.Room}] = flow
-			}
-		}
-	}
-	return out
 }
 
 func (v *viz) publish(ctx context.Context) {
 	// The history and the alert log move on whether or not BuildSim answers.
-	v.board.Tick(v.airflow(ctx))
+	v.board.Tick()
 	err := v.bs.PutRoomLayers(ctx, v.board.Layers())
 	if err == nil {
 		alerts := v.board.Alerts()

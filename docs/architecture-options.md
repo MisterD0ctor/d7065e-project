@@ -37,7 +37,7 @@ and critical reflection*.
 
 | # | Proposal said | Now | Reason | Affects |
 |---|---|---|---|---|
-| C-1 | The controller never sees occupancy. It estimates it from CO₂ (proposal §2) | **Each room has an occupancy sensor (people counter, BuildSim icon `occupancy_counter`).** Physics takes the true occupancy from occupancysim's per-minute record; the occupancy sensor in each room samples it from physics and writes a noisy count to that sensor, with the same sampling, noise and faults as the other sensors (D-2). The controller reads the sensor like any other device and never reads `/api/occupancy` directly | Lack of time: inverting the CO₂ mass balance is dropped from scope. Proposal §2 already named exposing occupancy directly as the fallback if the estimator proved infeasible, and said we would report it as such | D-2, D-5, D-6 step 1, D-8. The predictor, the policy and the baselines are unchanged |
+| C-1 | The controller never sees occupancy. It estimates it from CO₂ (proposal §2) | **Each room has an occupancy sensor (people counter, BuildSim icon `occupancy_counter`).** The physical model takes the true occupancy from the per-minute record occupancysim keeps in BuildSim and writes the true count to the counter's place there; the occupancy sensor reads it and reports a noisy count, with the same sampling, noise and faults as the other sensors (D-2, D-12). The controller reads the sensor like any other device and never reads `/api/occupancy` directly | Lack of time: inverting the CO₂ mass balance is dropped from scope. Proposal §2 already named exposing occupancy directly as the fallback if the estimator proved infeasible, and said we would report it as such | D-2, D-5, D-6 step 1, D-8. The predictor, the policy and the baselines are unchanged |
 
 Consequences of C-1:
 - **Sensors per room** go from 2 to 3 (temperature and CO₂, plus the occupancy counter), which
@@ -93,6 +93,7 @@ limits we are stuck with. Changes are logged in `external/README.md`.
 | Constraint | Source | Consequence for us |
 |---|---|---|
 | BuildSim stores **current state only**: no physics, no history, no occupancy generation | lab quickstart | We own physics, persistence and time series |
+| **BuildSim is in the middle.** The physical model writes the sensor values to BuildSim and reads the actuator states from it; sensor processes read the current readings from BuildSim and publish them onward; the occupancy sampler writes occupancy to BuildSim. Nothing connects these three to each other, or the autonomous service to BuildSim, except through it | lab quickstart, the diagram | D-12. The physical model and occupancysim talk only to BuildSim, and the control system reaches BuildSim only through its sensor and actuator processes. We first built another shape and changed to this one on 2026-10-10 |
 | The decision service **must not write actuator state to BuildSim itself**; it commands a separate actuator process that validates and applies | lab quickstart §3 | At least two containers on the control path: controller → actuator service → BuildSim |
 | occupancysim is the **only writer** of `/api/occupancy` and `/api/entities` (full-collection PUTs) | occupancysim README | None of our other services write occupancy. New occupancy behaviour goes into occupancysim itself, so BuildSim keeps a single source of truth |
 | **Every collection `PUT` replaces the whole collection**: room layers, alerts, effects, entities, occupancy | BuildSim visualization API | Only `viz` writes room layers and alerts. Other services publish events (overrides, degraded mode) on MQTT and `viz` turns them into alerts |
@@ -103,16 +104,18 @@ limits we are stuck with. Changes are logged in `external/README.md`.
 | **Each sensor/gateway and each actuator is its own process**, independently startable, stoppable and restartable. One monolithic script = U | Lecture 1, slides 18 and 24 (pass/fail) | Sensor gateways and actuators are separate containers (D-2, D-9) |
 | Processes share **no variables and no files, ever**; they talk only over HTTP or MQTT | Lecture 1, slide 18 | Storage is a service, not a shared folder (D-4, D-5) |
 | A process that crashes **re-registers with BuildSim and carries on**; killing any process should degrade the system, not kill it | Lecture 1, slide 17 | Registration at start must be idempotent; every consumer needs a fallback |
-| **The truth never enters BuildSim** or anything the controller can read | Lecture 2, slide 8 | Physics serves truth only to gateways and storage; the viewer shows measured values (D-8) |
+| **The controller never sees the truth** | Lecture 2, slide 8 | The truth is in BuildSim, where the physical model keeps it (the row above). The control system has no access to BuildSim except through its sensors, which add their own error, and the broker refuses it the truth topics. We first read this slide as "the truth never enters BuildSim" and built around that, against the quickstart (D-12) |
 | A data-driven component is required; threshold rules alone are not enough | Lecture 1, slide 22 | The occupancy predictor (FR-4) is that component |
-| **Our scope:** the controller never reads `/api/occupancy` directly. It sees occupancy only through the per-room occupancy sensor (changed from the proposal, see C-1) | proposal §2, C-1 | Nothing of ours reads `/api/occupancy`: BuildSim's copy is for the viewer. Physics takes occupancy from occupancysim's per-minute record (the two simulators are the truth layer), and the evaluation uses the truth recorded by storage |
+| **Our scope:** the controller never reads `/api/occupancy` directly. It sees occupancy only through the per-room occupancy sensor (changed from the proposal, see C-1) | proposal §2, C-1 | Nothing of ours reads `/api/occupancy`: that collection is for the viewer, and it carries no time. The physical model takes occupancy from the per-minute record occupancysim also keeps in BuildSim (D-1), and the evaluation uses the truth the recorder copies to storage |
 
 ### Facts about BuildSim and the example occupancysim that shape the design
 
 - **Simulated clock.** occupancysim runs at 60 simulated seconds per real
   second by default. Its clock is readable at `GET :8081/api/state` → `.clock`
   (`time`, `minute_of_day`, `weekday`, `factor`, `running`) and streamed on
-  `GET :8081/api/events`. BuildSim carries no time at all.
+  `GET :8081/api/events`. BuildSim carries no time at all, so occupancysim
+  now also publishes its clock into BuildSim, as the value of a sensor on a
+  piece of equipment of its own (D-1, D-12).
 - **Reproducible days.** Each day's plans are generated from the parameters
   plus a seed, so the same date and config give the same day. This is what
   makes the **oracle baseline** possible (see D-7). The plans were
@@ -171,6 +174,27 @@ one day disagreed in ~0.3 % of samples and the truth had a sample only every
 2 model-minutes. Trade-off: physics depends on an endpoint we added to
 occupancysim, and BuildSim's occupancy is now used by the viewer only.
 
+**Changed 2026-10-10 (D-12): the clock and the minute record come through
+BuildSim.** Physics may talk only to BuildSim, and occupancysim too. So
+occupancysim keeps a "simulation clock" in BuildSim: one piece of equipment
+with two text sensors, the model time and the last ten minutes of the
+per-minute record (the same document `GET /api/minutes` returns). Physics
+reads that sensor four times a real second and steps through the minutes it
+has not done yet; ten minutes of history are five real seconds at factor 120,
+so it misses none, and the stepping is as reproducible as before. Nothing of
+ours calls occupancysim's API any more.
+
+**The devices' time** follows the physical state, not the simulation clock.
+After physics has written a minute's values to BuildSim it writes that minute
+to every *clock device's* sensor, last. A clock is a sensor like any other
+(D-2): its process reads the time from BuildSim and publishes it on
+`time/model`. A sensor that sees a new minute there reads its value from
+BuildSim and finds that minute's value: one reading per sensor and minute,
+none missed and none read twice (measured: 18 000 of 18 000 at factor 120).
+Rejected alternative: the devices follow occupancysim's clock directly; then
+a sensor and the physical model race at every minute and a reading is
+sometimes the minute before.
+
 Numbers to keep in mind:
 - **Evaluation takes real time.** At factor 60, 5 simulated weekdays take
   2 real hours, and every baseline needs its own run: ~8 h for all four
@@ -193,22 +217,29 @@ it, and **the truth is never published to BuildSim**.
 |---|---|---|
 | A. Physics adds noise and writes sensor values to BuildSim itself | Fewest parts | **Breaks the course rule**: no sensor process. Also puts truth and observation in one process |
 | B. Physics serves the truth over its own HTTP API; one gateway container per sensor kind samples it for all rooms, adds noise and faults, and writes to BuildSim | Matches Lecture 2; only three containers | A gateway crash silences that kind in every room; ids and rooms come from configuration, not from an installer |
-| **C. Physics serves the truth over its own HTTP API (`GET /rooms?room=level0/1570`). Every sensor is its own container: it knows only its device id and hardware kind, learns its room from the registry (D-10), samples its room's truth every 60 model-s, adds noise and faults, and `PUT`s the reading to BuildSim** | One process per device, as a real installation has. A dead sensor affects one room. Truth stays out of BuildSim | ~150 sensor containers for 50 rooms; the compose file is generated (`cmd/gendevices`) |
+| C. Physics serves the truth over its own HTTP API (`GET /rooms?room=level0/1570`). Every sensor is its own container: it knows only its device id and hardware kind, learns its room from the registry (D-10), samples its room's truth every 60 model-s, adds noise and faults, and `PUT`s the reading to BuildSim | One process per device, as a real installation has. A dead sensor affects one room. Truth stays out of BuildSim | ~150 sensor containers for 50 rooms. **A second connection between the physical model and the devices, beside BuildSim, which the lab's architecture doesn't have** (D-12) |
+| **D. The quickstart shape. Physics writes the value at every sensor's place in BuildSim: CO₂, temperature and head-count as they truly are. Every sensor is its own container, as in C; once per sample period it reads its value from BuildSim, adds its own noise and faults, and publishes the reading on MQTT. It writes nothing to BuildSim** | The lab's architecture: BuildSim is the building, and the only thing between the physical model and the devices. One process per device, a dead sensor affects one room, and a fault is still a property of one device | The truth is in BuildSim, so the viewer's equipment panel shows true values, not readings. The controller is kept from it by having no way to BuildSim but its sensors |
 
-The course material is not consistent here. The lab quickstart diagram and the
-report guide (§3.2) have the *physics* write sensor values into BuildSim and
-sensor processes read them back and publish onward. Lecture 1 (slide 16) and
-Lecture 2 (slide 7) have sensor processes write the readings. We follow the
-lectures because they keep the truth out of BuildSim. Say so in the report and
-name the quickstart shape as the rejected alternative.
+The course material pulls two ways here. The lab quickstart's diagram, and the
+report guide (§3.2), have the *physical model* write the sensor values into
+BuildSim and the sensor processes read them and publish onward. Lecture 2
+(slide 8) says the truth must not reach the controller, and shows a physics
+engine with an API of its own. We first followed the lecture and read it as
+"the truth never enters BuildSim": C, decided 2026-09-30 after first building
+B, and run through both evaluations.
 
-**Chosen: C** (decided 2026-09-30, after first building B). The registry, not
+**Chosen: D (2026-10-10), replacing C.** C was the wrong reading. The
+quickstart is the lab's architecture; the lecture's point is that the
+*controller* must not see the truth, and D keeps that without a side channel:
+the controller has no BuildSim address at all (D-12). The noise and the
+faults stay where C had them, in the sensor's own process. The registry, not
 the sensor, registers the equipment in BuildSim (D-10). Fault injection is
 config on one device (`FAULT_CO2_0001=stuck`), set with
 `deploy/fault.sh co2-0001 stuck`.
 
-**Scale check:** 3 sensors × 50 rooms = 150 PUTs per sample, one per sensor
-container. The whole building (838 rooms) would be ~2 500 PUTs per sample, and
+**Scale check:** per model minute physics writes one value per sensor (150 for
+50 rooms, plus the clock and its record), 16 at a time, and each sensor reads
+one. The whole building (838 rooms) would be ~2 500 writes per minute, and
 each one triggers a viewer broadcast.
 
 ## D-3. Transport: getting observations to their consumers
@@ -228,8 +259,17 @@ more rooms arrive.** Record the switch and its reason. Evidence like "REST
 polling of N rooms took X ms per cycle" is exactly the evaluated trade-off the
 report asks for, and the proposal already names this risk.
 
-With B, the controller keeps REST polling of BuildSim as its **fallback when
-the broker is down**. That is a degraded path worth testing (NFR-6).
+With B, the controller first kept REST polling of BuildSim as its fallback
+when the broker was down. **Removed 2026-10-10 (D-12):** the controller may
+reach BuildSim only through the sensor processes, and they speak MQTT. A
+lost broker now means no observations and no commands at all; the actuators
+notice that the time signal has stopped, keep time themselves, let their
+commands expire and go to design flow (D-6, T-24). That is one degraded path
+where there were two, and it needs nothing from the controller.
+
+Since D-12 the sensors no longer write their readings to BuildSim (the value
+there is the physical model's), so "two writes per reading" is gone too: a
+reading exists on MQTT, and in storage.
 
 ## D-4. Storage
 
@@ -297,6 +337,15 @@ Also needed:
   control, or to design flow if CO₂ itself is missing (FR-7). A stale sensor
   is found by its silence. A stuck one keeps talking; D-11 is how it is found.
 - **Hysteresis and dwell times**, measured in model time.
+- **A clock of the actuator's own.** The TTL is counted in model time, which
+  the actuator gets from the building's clock device over MQTT (D-1). The
+  clock repeats the time every real second, also while the model clock is
+  paused. If five beats are missed (the clock device or the broker is gone)
+  the actuator keeps time itself, at the last known speed, so its command
+  still expires and it still reaches its safe default. Without this a lost
+  broker would freeze every damper at its last command for good. The override
+  takes its CO₂ from the room's sensor over MQTT and from nowhere else: the
+  value in BuildSim is the truth, and no part of the control system reads it.
 
 **Heating** is the same for every policy, so the baselines differ only in
 ventilation: 21 °C in the occupied hours (weekdays 07–18) and an 18 °C setback
@@ -316,10 +365,20 @@ Implement the policy as an interface with four implementations chosen by a
 flag: `constant`, `reactive`, `predictive`, `oracle`. Everything else stays
 identical between runs, which is what makes the comparison fair.
 
+**`constant` is a time clock** (changed 2026-10-10): design flow in the
+occupied hours, weekdays 07 to 18, and the unoccupied minimum otherwise, with
+no regard for CO₂ or people. Until then it was design flow around the clock.
+No building runs full ventilation through the night, so that baseline made
+every other policy look better than it is: most of the "saving" was simply
+the night. The scheduled one is what a building without demand control
+actually does, and the honest thing to be compared with. Trade-off: with the
+schedule it no longer ventilates the night guards' rounds or anyone who stays
+late, which shows in its air-quality number.
+
 The oracle needs *future* occupancy. occupancysim does not expose its plans, but
 days are reproducible from seed and date. So:
 
-1. Run the day once; storage records the true occupancy that physics publishes on `truth/#`.
+1. Run the day once; storage records the true occupancy, which the truth recorder copies from the physical model's record in BuildSim to `truth/#` (D-12).
 2. Rerun the same seed and date with `oracle`. It fetches that recording from
    storage (`GET /history?kind=true_occupancy…`), shifted by the lead time. It
    never reads the live truth.
@@ -350,6 +409,11 @@ is the control loop's own timing (when a reading arrives, when a command
 lands), which is inherent to separate processes and is what the system is
 meant to tolerate.
 
+**After D-12 (2026-10-10)** the record reaches physics through BuildSim
+instead of occupancysim's API. A check run of that Monday morning on the new
+path gave the same head-counts, minute for minute, as the truth recorded in
+the earlier evaluation: the day is the same day.
+
 ## D-8. Dashboard
 
 The report guide (§3.12) accepts either "BuildSim's session API or a separate
@@ -374,9 +438,12 @@ every two seconds can't wait for storage to read a whole run. Storage stays
 the owner of the history (D-4): after a restart `viz` reads the run so far
 from it, so a killed dashboard comes back with its graphs (NFR-6).
 
-Show **measured** CO₂, not true CO₂: the truth never enters BuildSim
-(Lecture 2, slide 8), and it never reaches `viz` either. The truth appears
-only in the evaluation. The one derived number on the page, ventilation
+Show **measured** CO₂, not true CO₂. Since D-12 the true values are in
+BuildSim, as the sensors' values, and the viewer's equipment panel shows them
+to anyone who clicks a device. `viz` doesn't read them: everything in its
+layers and graphs arrived on MQTT from a sensor, the controller or an
+actuator, so the dashboard shows the building as the control system knows it.
+The truth is used only by the evaluation. The one derived number on the page, ventilation
 power, is computed from the airflow the dampers report with the energy
 proxy's constants (IF-11).
 
@@ -398,7 +465,7 @@ they reached, with faults like stuck or slow.
 | Option | Pro | Con |
 |---|---|---|
 | A. One actuator container per kind (`actuator-damper`, `actuator-heating`), each for all rooms | Two containers | A crash affects every room of that kind; built first, then replaced |
-| **B. One container per actuator: a damper or a radiator valve in one room. It learns its room and the room's sizing from the registry and advertises where to send commands (D-10). `POST /rooms/{level}/{room}/command {value, cmd_id, issued_at}`, idempotent on `cmd_id`. Moves towards the target at a fixed rate in model time, `PUT`s the reached state to BuildSim, and physics reads it back from there** | Real per-device isolation: one failed damper affects one room | ~100 actuator containers for 50 rooms, generated |
+| **B. One container per actuator: a damper or a radiator valve in one room. It learns its room and the room's sizing from the registry and advertises where to send commands (D-10). `POST /rooms/{level}/{room}/command {value, cmd_id, issued_at}`, idempotent on `cmd_id`. Moves towards the target at a fixed rate in model time, `PUT`s the reached state to BuildSim, where physics reads it back, and publishes it on MQTT for the dashboard** | Real per-device isolation: one failed damper affects one room | ~100 actuator containers for 50 rooms, generated |
 | C. One actuator container for everything | Fewest containers | Heating and ventilation fail together |
 
 **Chosen: B** (2026-09-30). The controller finds each room's actuators through
@@ -414,7 +481,7 @@ files a developer edits.
 |---|---|---|
 | A. Device lists in configuration (`ROOMS` per service, ids derived from room names) | No extra service | Nobody installs anything; a new device means editing and redeploying services |
 | B. The installer registers devices straight in BuildSim's equipment list | No new service | BuildSim is "restart = blank" (Lecture 1, slide 16), so every installation is lost on restart; BuildSim isn't ours |
-| **C. A `registry` service with its own SQLite database. The installer enters id, kind and room (web form at `:8070` or `cmd/install`). The registry checks the room exists in the floor plan, stores the room's sizing, and keeps BuildSim's equipment list in step, recreating it after a BuildSim restart. A device boots knowing only its id and kind, checks in, and learns its room; until it is registered it does nothing. Actuators advertise their address at check-in, so the controller finds them (the service-registry pattern, Lecture 1, slide 41)** | Matches how a building is commissioned. Typos are caught at installation. BuildSim restarts are harmless | One more service on the start-up path; if the registry is down, new devices can't start (running ones keep going) |
+| **C. A `registry` service with its own SQLite database. The installer enters id, kind and room (web form at `:8070` or `cmd/install`). The registry checks the room exists in the floor plan, stores the room's area and the design capacity the installer gives for it (the two things its ventilation is sized by), and keeps BuildSim's equipment list in step, recreating it after a BuildSim restart. A device boots knowing only its id and kind, checks in, and learns its room; until it is registered it does nothing. Actuators advertise their address at check-in, so the controller finds them (the service-registry pattern, Lecture 1, slide 41)** | Matches how a building is commissioned. Typos are caught at installation. BuildSim restarts are harmless | One more service on the start-up path; if the registry is down, new devices can't start (running ones keep going) |
 
 **Chosen: C** (suggested by the lecturer). Known limitation: devices don't
 authenticate to the registry. A real installation would hand each device a
@@ -494,6 +561,86 @@ and CO₂ only (`degraded_occupancy`). The decision says what was found
 
 ---
 
+## D-12. The data path: BuildSim in the middle
+
+The lab quickstart draws one data path:
+
+```
+physical model ──PUT sensor values──► BuildSim ◄──PUT occupancy── occupancy sampler
+physical model ◄──GET actuator states── BuildSim
+sensor processes ◄──GET current readings── BuildSim
+sensor processes ──publish──► data pipeline ──► autonomous service ──command──► actuator process
+actuator process ──PUT applied state──► BuildSim
+```
+
+Until 2026-10-10 we ran another one, and both evaluations were measured on
+it. This section records the two, and why we changed with two days left.
+
+| Option | Pro | Con |
+|---|---|---|
+| A. The truth beside BuildSim (built first). Physics reads the clock and the people from occupancysim's API, serves the truth to the sensors over an API of its own, and publishes the truth (for storage) and the time (for the actuators) on MQTT. Sensors write their noisy readings to BuildSim. The controller, and the damper's override, read those from BuildSim when the broker is silent | BuildSim holds only what devices measured, so nothing true can leak through it. A second way for readings to reach the controller when the broker is down | **Not the lab's architecture.** Four connections the quickstart doesn't have: physics–occupancysim, physics–sensors, physics–broker, controller–BuildSim. The building exists twice, as the truth API and as BuildSim, and BuildSim is not in the loop it is meant to be the centre of: sensors would keep reporting with BuildSim gone |
+| **B. The quickstart shape. occupancysim and the physical model talk to BuildSim and to nothing else. The physical model writes the true value at every sensor; each sensor process reads its own, adds its error and publishes. The control system (controller, storage, dashboard) knows the building only through what sensor and actuator processes publish** | One representation of the building, in one place. Every arrow is one the quickstart draws. Each process boundary is the one the course names: physical model, sensor process, data pipeline, autonomous service, actuator process | The truth is in BuildSim. BuildSim has no clock, so the model time has to be put there. The evaluation's truth needs a route of its own. One way only into the controller: no broker, no control |
+
+**Chosen: B (2026-10-10).** A came from reading Lecture 2's "the truth never
+reaches the controller" as "the truth never enters BuildSim" and then
+building around BuildSim to keep it out. The rule is about the controller,
+and B keeps it more simply: the controller is given no BuildSim address.
+
+What changed, process by process:
+
+| Process | Before | Now |
+|---|---|---|
+| occupancysim | Wrote entities and occupancy to BuildSim; served its clock and minute record to physics, the actuators and the registry | Also keeps its clock and the last ten minutes of the record in BuildSim, on equipment of its own (D-1). Nothing of ours calls its API |
+| physics | Read occupancysim; read actuator states from BuildSim; truth API for the sensors; truth and time on MQTT | Reads the clock, the record and the actuator states from BuildSim. Writes the true value at every sensor, the time at every clock, and the rooms' full state as a record (IF-5). No broker, no API, no run id |
+| sensor devices | Read the truth from physics, wrote the reading to BuildSim, published it | Read their value from BuildSim, publish the reading. Write nothing to BuildSim |
+| clock device (new) | – | A sensor of kind `clock`: reads the time physics writes, publishes it on `time/model` (D-1) |
+| actuator devices | Time from physics on MQTT, from occupancysim as fallback; CO₂ for the override from MQTT, from BuildSim as fallback | Time and CO₂ from MQTT only, with a clock of their own when the time signal is lost (D-6). They also publish their state on MQTT |
+| controller | Observations from MQTT, from BuildSim as fallback | MQTT only |
+| truthlog (new) | Physics published the truth itself | Copies the physical model's record from BuildSim to the truth topics, for storage. Outside the control system |
+| viz | Read the dampers' state from BuildSim | Gets it from the actuators on MQTT. Still writes layers and alerts to BuildSim |
+| registry | Room capacities from occupancysim | From the installer (D-10). Still creates the devices' equipment in BuildSim |
+| evaluator | Room roles from occupancysim | From the registry |
+
+Who talks to BuildSim now: occupancysim (people and its clock), physics
+(reads and writes), each sensor and the clock (read their own value), each
+actuator (writes its own state), truthlog (reads the record), the registry
+(the devices' equipment), viz (layers and alerts). Not the controller, not
+storage, not the trainer.
+
+What it kept, what it gave, what it cost:
+- **Reproducibility is kept** (NFR-7): the record that made the days
+  identical travels through BuildSim now. A check run matched the earlier
+  evaluation's recorded Monday minute for minute.
+- **Sampling got exact.** A sensor used to poll physics on its own schedule
+  and now and then missed a minute (0.01–0.1 % of readings). It now samples
+  when the building's clock shows a new minute, which the physical model
+  writes after that minute's values: 18 000 of 18 000 readings in a test at
+  factor 120.
+- **The truth is on display.** Clicking a device in the BuildSim viewer shows
+  the true value, not what the device reported. The dashboard's layers and
+  graphs still show the readings.
+- **No second path.** A lost broker used to be bridged by polling BuildSim.
+  Now it stops the control loop, and the actuators take their safe defaults
+  on their own (D-6, T-24). Safe, and wasteful for as long as it lasts.
+- **Three sensor values that aren't measurements**: the simulation clock's
+  two and the physical model's record. A text sensor is the only free-form
+  slot BuildSim's API has, and we use it as one. The viewer shows them as
+  what they are named.
+- **Everything measured before had to be measured again.** Both evaluations
+  and the fault tests ran on A; the results in the report are from reruns on
+  B (evaluation-results.md).
+
+What still stands outside the quickstart's diagram, on purpose:
+- The **registry** creates the devices' equipment in BuildSim; the devices
+  don't register themselves (D-10).
+- **viz** writes room layers and alerts to BuildSim, which is the quickstart's
+  own route for a dashboard (§5 there).
+- The **experimenter's scripts** set occupancysim's date and speed and pause
+  it. That is a person operating the simulator, not a process of the system.
+- BuildSim has no authentication. The controller is kept from the truth by
+  not being given BuildSim's address, and by the broker's access list; a
+  process that was handed the address could read everything (T-27).
+
 ## What the recommended options add up to (draft container view)
 
 ```
@@ -527,19 +674,20 @@ and CO₂ only (`degraded_occupancy`). The decision says what was found
                                        └─────────┘
 ```
 
-Our containers: `physics`, `registry`, `controller`, `storage`, `viz`, `train`
-(batch) and `mosquitto`, plus **one container per device** (5 per room:
-CO₂, temperature and occupancy sensors, damper, radiator valve), generated
-into `compose.devices.yaml` from the installation list `deploy/devices.csv`.
-The sketch above predates the registry and per-device containers; the D2
-diagram (`docs/diagrams/container.d2`) is current.
+Our containers: `physics`, `truthlog`, `registry`, `controller`, `storage`,
+`viz`, `train` (batch) and `mosquitto`, plus **one container per device** (5
+per room: CO₂, temperature and occupancy sensors, damper, radiator valve; and
+one clock for the building), generated into `compose.devices.yaml` from the
+installation list `deploy/devices.csv`. The sketch above is the first design:
+it predates the registry, the per-device containers and D-12. The D2 diagram
+(`docs/diagrams/container.d2`) is current.
 
 Repo layout (Go, one module, one `cmd/` per binary; `sensor` and `actuator`
 run as one container per device):
 
 ```
 cmd/physics cmd/sensor cmd/actuator cmd/controller cmd/storage cmd/registry
-cmd/viz cmd/train cmd/evaluate
+cmd/viz cmd/truthlog cmd/train cmd/evaluate
 cmd/install cmd/gendevices                     # installer's tool, compose generator
 internal/buildsim internal/clock internal/devreg internal/registry internal/store
 internal/msg internal/mqttx internal/faults internal/roommodel internal/sizing
@@ -559,8 +707,8 @@ report §10.
 
 | ID | Requirement | Verified by |
 |---|---|---|
-| FR-1 | Physics simulates CO₂ (mass balance) and temperature (heat balance) per room with first-order dynamics. It is driven by true occupancy and the commanded airflow and setpoint, and integrates in model time with dt ≤ 1 model-min | Unit test: a step response matches the analytic τ within 5 % |
-| FR-2 | Three sensor gateways (CO₂, temperature, occupancy count; C-1) sample each room's truth from physics every 60 model-s and publish readings to BuildSim, with noise: CO₂ ±(30 ppm + 3 %), temperature ±0.3 °C, count ±1 | Unit test on the noise package; inspect a logged run |
+| FR-1 | Physics simulates CO₂ (mass balance) and temperature (heat balance) per room with first-order dynamics. It is driven by true occupancy and the airflow and setpoint the actuators have reached, and integrates in model time with dt ≤ 1 model-min. BuildSim is all it reads and writes (D-12) | Unit tests: a step response matches the analytic τ within 5 % (T-01); the loop against a stand-in BuildSim (T-41) |
+| FR-2 | Every room has three sensor devices (CO₂, temperature, occupancy count; C-1). Each reads the value at its place in BuildSim every 60 model-s and publishes its reading on MQTT with its own noise: CO₂ ±(30 ppm + 3 %), temperature ±0.3 °C, count ±1. One clock device does the same for the time | Unit tests on the noise package and the sensor (T-03, T-04, T-41); inspect a logged run |
 | FR-3 | The controller sets the airflow level and heating setpoint for every room in the room set, once per control period | Integration test: one room end to end (first slice) |
 | FR-4 | The controller predicts each room's occupancy one lead time ahead (lead time ≈ the room's CO₂ τ). The model is trained offline from stored history | Offline test: prediction error (MAE) on a held-out day beats a naive "same as now" prediction |
 | FR-5 | The actuator validates every command before applying it: value range, rate of change, TTL in model time, and duplicates (idempotent on `cmd_id`). It rejects invalid commands with a reason, and moves towards accepted targets at a fixed rate | Unit tests with out-of-range, stale and duplicate commands |
@@ -569,7 +717,7 @@ report §10.
 | FR-8 | Every observation, ground-truth value, command and decision is stored with model time and a run id | Check: a run's JSONL files can rebuild its report plots |
 | FR-9 | The policy is chosen by a flag: `constant`, `reactive`, `predictive`, `oracle`. Everything else is identical between runs | Config diff between runs shows only the policy changed |
 | FR-10 | The BuildSim viewer shows measured CO₂, measured and predicted occupancy, airflow and temperature per room, plus alerts for overrides, silent or stuck sensors and actuators on fallback. `viz`'s own page shows the same per room and for the whole building as graphs over time, up to a week back, with the periods an alert was active | T-16, T-39 |
-| FR-11 | Devices are commissioned in the registry: a device does nothing until an installer has registered its id, kind and room, and the registry keeps BuildSim's equipment list in step with what is installed, also after a BuildSim restart | T-17, T-28–T-30 |
+| FR-11 | Devices are commissioned in the registry: a device does nothing until an installer has registered its id, kind and room (and, for a room's first device, how many people the room is designed for), and the registry keeps BuildSim's equipment list in step with what is installed, also after a BuildSim restart | T-17, T-28–T-30 |
 
 ### Non-functional
 
@@ -579,8 +727,8 @@ report §10.
 | NFR-2 | **Comfort:** 20–24 °C for ≥ 95 % of occupied room-minutes | Evaluation run |
 | NFR-3 | **Energy:** energy proxy (fan power + delivered heat) ≥ 30 % below `constant`, and no worse than `reactive` while meeting NFR-1 better than it does | Compare baselines |
 | NFR-4 | **Latency:** a command shows up in BuildSim within 1 control period (≤ 1 model-min, which is ~1 s real at factor 60) | Timestamps in the log, reported as p95 |
-| NFR-5 | **Scale:** for the chosen room set (50 rooms, 150 sensor writes per sample, which is 150 PUTs per real second at factor 60 and a 60 model-s sample period), a full sample cycle finishes within one sample period | Load test. This is also the REST → MQTT evidence for D-3 |
-| NFR-6 | **Robustness:** any one of our containers can be killed and restarted without an unsafe state. The actuator falls back to design flow when commands expire (TTL). The loop resumes within 30 s real | Chaos test: `docker kill` each service |
+| NFR-5 | **Scale:** for the chosen room set (50 rooms: 150 sensor values written by physics and 150 read by the sensors per model minute, which is per real second at factor 60), a full cycle finishes within one sample period | Load test. Measured at factor 120: every sensor reported every minute (D-12) |
+| NFR-6 | **Robustness:** any one of our containers can be killed and restarted without an unsafe state. The actuator falls back to design flow when commands expire (TTL), also when it has lost the time signal or the broker. The loop resumes within 30 s real | Chaos test: `docker kill` each service; T-24, T-40 |
 | NFR-7 | **Reproducibility:** same seed and date give identical occupancy, and every number in the report traces to a run id | T-25: two runs diffed record by record. Failed in the first evaluation (99.6 % equal); holds since the 2026-10-06 fix (D-7) |
 | NFR-8 | **Evaluation cost:** 5 simulated weekdays per baseline run in ≤ 2.5 h real, so all 4 baselines fit in one day. The last day to start them is ~9 Oct | Timed run |
 
@@ -596,8 +744,10 @@ Where the numbers come from:
 ### Ventilation sizing
 
 Per room, from the Swedish workplace rule (AFS: 7 l/s per person plus
-0.35 l/s·m² for sedentary work) and the design capacities occupancysim uses for
-each room role:
+0.35 l/s·m² for sedentary work) and the room's design capacity. The capacity
+is commissioning data: the installer enters it with the room's first device
+(`deploy/rooms.csv`, D-10). Ours are the capacities occupancysim's room roles
+imply, written down once:
 
 ```
 q_design = 7 l/s × capacity + 0.35 l/s·m² × area
@@ -607,7 +757,7 @@ capacity: office 1 · lecture area/2 · fika area/4   (occupancysim model.md)
 | Flow level | Value | Used by |
 |---|---|---|
 | Maximum | 1.5 × q_design | FR-6 override (CO₂ > 1100 ppm); the upper bound of the actuator range |
-| Design | q_design | `constant` baseline; actuator fallback when a command's TTL expires (NFR-6); degraded mode without CO₂ (FR-7) |
+| Design | q_design | `constant` baseline in the occupied hours; actuator fallback when a command's TTL expires (NFR-6); degraded mode without CO₂ (FR-7) |
 | Occupied minimum | 0.35 l/s·m² | FR-6 floor during occupied hours |
 | Unoccupied minimum | 0.10 l/s·m² | Setback floor when empty (Boverket BBR minimum for when nobody is present) |
 
@@ -633,17 +783,18 @@ is why the maximum sits above design.
 
 | # | Decision | Chosen | Rejected alternative | Requirement served | Trade-off accepted |
 |---|---|---|---|---|---|
-| D-1 | Time source and stepping | Physics steps by whole model minutes from occupancysim's per-minute record; observations carry model time | Every service keeps its own `wall × factor` clock; physics sampling BuildSim's occupancy on its own tick | FR-1, NFR-4, NFR-7 | Physics depends on occupancysim being up, and on an endpoint we added to it |
-| D-2 | Sensor noise/faults | One container per sensor device, sampling its room from a truth API on physics | Physics writes noisy values to BuildSim itself; one gateway per kind | FR-2, FR-7, FR-11 | ~150 sensor containers; a truth API to specify |
-| D-3 | Transport | REST for the first slice; gateways also publish to MQTT once storage exists | A separate collector polling BuildSim | NFR-5, NFR-6 | A broker to run; two non-atomic writes per reading |
+| D-1 | Time source and stepping | Physics steps by whole model minutes from occupancysim's per-minute record, which it reads in BuildSim. The devices' time is the minute physics has last written, told by a clock device | Every service keeps its own `wall × factor` clock; physics sampling BuildSim's occupancy collection on its own tick; devices following occupancysim's clock directly | FR-1, NFR-4, NFR-7 | The clock and the record are sensor values in BuildSim that occupancysim had to be changed to write |
+| D-2 | Sensor noise/faults | One container per sensor device. It reads the true value at its place in BuildSim and reports it with its own noise and faults | A truth API on physics for the sensors (built first); physics writing noisy values itself; one gateway per kind | FR-2, FR-7, FR-11 | ~150 sensor containers; the true values are visible in BuildSim |
+| D-3 | Transport | Sensors and actuators publish on MQTT; that is the control system's only way to the building | Everyone polling BuildSim (the first slice); polling BuildSim as the controller's fallback (removed) | NFR-5, NFR-6 | A broker to run, and no control without it: the actuators then take their safe defaults |
 | D-4 | Storage | A `storage` service owning JSONL per run, served over HTTP | JSONL files shared between processes | FR-8, NFR-7 | A small query API to write |
 | D-5 | Decomposition of autonomy | Validation, prediction and policy in one controller; training as a batch job | Predictor as its own service | FR-3, FR-4 | Parts of the controller can't be restarted separately |
 | D-6 | Safety filter placement | In the actuator, independent of the controller | Inside the controller, after the policy | FR-5, FR-6, NFR-6 | The actuator needs sizing data and the CO₂ stream |
 | D-7 | Baselines/oracle | Policy interface with four implementations; the oracle replays recorded truth | Oracle reading occupancysim's plans | FR-9, NFR-7 | Depends on same-seed runs being identical, which needed the D-1 change |
 | D-8 | Dashboard | `viz` process: room layers and alerts in the BuildSim viewer, and its own page with graphs over time | Grafana over storage; the viewer alone | FR-10, FR-7 | The graphs' history is a second copy in `viz`'s memory, refilled from storage after a restart; the airflow reached before a restart is not recovered |
 | D-9 | Actuator granularity | One container per actuator device | One container per kind for all rooms | FR-5, NFR-6 | ~100 actuator containers, generated |
-| D-10 | Device commissioning | Registry service with SQLite; devices learn their room at check-in | Device lists in configuration; registering straight in BuildSim | FR-11 | One more service on the start-up path; no device authentication |
+| D-10 | Device commissioning | Registry service with SQLite; devices learn their room at check-in; the installer gives each room's design capacity | Device lists in configuration; registering straight in BuildSim; capacities from occupancysim | FR-11 | One more service on the start-up path; no device authentication |
 | D-11 | Stuck-sensor detection | Run of identical readings for CO₂ and temperature; the counter against two CO₂ mass-balance bounds that hold for any airflow | "Counter unchanged while CO₂ moves"; estimating the head-count from CO₂ and the airflow | FR-7 | Blind to small over-counts; a counter is found only after the room's air disagrees (15–20 min in a lecture room, 75 in an office) |
+| D-12 | The data path | The quickstart shape: occupancysim and the physical model talk only to BuildSim; the control system reaches it only through sensor and actuator processes | The truth beside BuildSim: a truth API on physics, occupancysim's API, the controller polling BuildSim (built first, both evaluations ran on it) | FR-1, FR-2, NFR-6, NFR-7 | The truth is in BuildSim; no control without the broker; a recorder for the evaluation's truth; everything had to be measured again |
 | — | **Room set (scale)** | 50 rooms on level0: the 3 fika rooms, 20 lecture rooms and 27 offices, as a fixed list in config (a seeded random sample, so it is reproducible) | Whole building (838 rooms, ~2 500 PUTs per sample) or all of level0 (277 rooms) | NFR-5 | Most of level0's lecture rooms are left out, so many lectures land in rooms we don't simulate. With 20 of ~48, about 40 % of the lectures fall inside the set |
 
 Each row cites a requirement ID from the section above. The report guide

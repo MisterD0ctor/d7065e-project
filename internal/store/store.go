@@ -18,6 +18,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/MisterD0ctor/d7065e-project/internal/dedup"
 )
 
 // Streams, named after the MQTT topic prefixes.
@@ -33,14 +35,14 @@ type Store struct {
 
 	mu    sync.Mutex
 	files map[string]*os.File // "<run>/<stream>" → open file
-	seen  map[string]int64    // "<run>/<sensor_id>" → highest seq stored
+	seen  *dedup.Set          // readings already stored, by "<run>/<sensor_id>"
 }
 
 func Open(dir string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Join(dir, "models"), 0o755); err != nil {
 		return nil, err
 	}
-	return &Store{dir: dir, files: map[string]*os.File{}, seen: map[string]int64{}}, nil
+	return &Store{dir: dir, files: map[string]*os.File{}, seen: dedup.New()}, nil
 }
 
 func (s *Store) Close() {
@@ -77,21 +79,14 @@ func (s *Store) Append(stream string, record []byte) (bool, error) {
 	if h.Room == "" {
 		return false, errors.New("room missing")
 	}
-	if stream != "decision" || h.ModelTime != "" {
-		// Decisions made in the REST fallback have no model time (IF-8).
-		if _, err := time.Parse(time.RFC3339, h.ModelTime); err != nil {
-			return false, fmt.Errorf("model_time %q: %w", h.ModelTime, err)
-		}
+	if _, err := time.Parse(time.RFC3339, h.ModelTime); err != nil {
+		return false, fmt.Errorf("model_time %q: %w", h.ModelTime, err)
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if stream == "obs" {
-		key := h.RunID + "/" + h.SensorID
-		if h.Seq <= s.seen[key] {
-			return false, nil
-		}
-		s.seen[key] = h.Seq
+	if stream == "obs" && !s.seen.Fresh(h.RunID+"/"+h.SensorID, h.Seq) {
+		return false, nil
 	}
 	f, err := s.file(h.RunID, stream)
 	if err != nil {

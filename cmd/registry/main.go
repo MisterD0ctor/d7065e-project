@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/MisterD0ctor/d7065e-project/internal/buildsim"
-	"github.com/MisterD0ctor/d7065e-project/internal/clock"
 	"github.com/MisterD0ctor/d7065e-project/internal/env"
 	"github.com/MisterD0ctor/d7065e-project/internal/registry"
 	"github.com/MisterD0ctor/d7065e-project/internal/rooms"
@@ -30,13 +29,11 @@ import (
 var installPage []byte
 
 type service struct {
-	db  *registry.DB
-	bs  *buildsim.Client
-	occ *clock.Client
+	db *registry.DB
+	bs *buildsim.Client
 
 	mu     sync.Mutex
 	floors map[string]buildsim.Floor // cached floor plans, by level
-	caps   map[string]int            // occupancysim capacities, by <level>/<room>
 }
 
 func main() {
@@ -51,7 +48,6 @@ func main() {
 	s := &service{
 		db:     db,
 		bs:     buildsim.New(env.String("BUILDSIM_URL", "http://buildsim:9090")),
-		occ:    clock.New(env.String("CLOCK_URL", "http://occupancysim:8081")),
 		floors: map[string]buildsim.Floor{},
 	}
 
@@ -92,6 +88,11 @@ type installRequest struct {
 	Kind        string `json:"kind"`
 	Room        string `json:"room"`
 	InstalledBy string `json:"installed_by"`
+	// Capacity is how many people the room is designed for, from the
+	// drawings. It sizes the room's ventilation, and it counts for the first
+	// device installed in a room. Without it the registry estimates one from
+	// the floor area.
+	Capacity int `json:"capacity,omitempty"`
 }
 
 func (s *service) handleInstall(w http.ResponseWriter, r *http.Request) {
@@ -105,7 +106,11 @@ func (s *service) handleInstall(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusUnprocessableEntity, "%v", err)
 		return
 	}
-	info, err := s.roomInfo(r.Context(), k)
+	if req.Capacity < 0 {
+		httpError(w, http.StatusUnprocessableEntity, "capacity %d: a room can't hold fewer than nobody", req.Capacity)
+		return
+	}
+	info, err := s.roomInfo(r.Context(), k, req.Capacity)
 	if err != nil {
 		httpError(w, http.StatusUnprocessableEntity, "%v", err)
 		return
@@ -127,10 +132,13 @@ func (s *service) handleInstall(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, dev)
 }
 
-// roomInfo checks that the room exists in the floor plan and finds its area
-// and design capacity. A typo in the room is caught here, at installation,
-// instead of as a device that silently reports for a room nobody controls.
-func (s *service) roomInfo(ctx context.Context, k rooms.Key) (registry.RoomInfo, error) {
+// roomInfo checks that the room exists in the floor plan and finds its area.
+// A typo in the room is caught here, at installation, instead of as a device
+// that silently reports for a room nobody controls. The design capacity is
+// the installer's to give; a room without one gets an estimate from its area
+// (sizing.Capacity), which takes any large room for a lecture room: more
+// airflow than a common room needs, never less.
+func (s *service) roomInfo(ctx context.Context, k rooms.Key, capacity int) (registry.RoomInfo, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	floor, ok := s.floors[k.Level]
@@ -150,16 +158,7 @@ func (s *service) roomInfo(ctx context.Context, k rooms.Key) (registry.RoomInfo,
 	if area == 0 {
 		return registry.RoomInfo{}, fmt.Errorf("room %s is not in the floor plan", k)
 	}
-	if s.caps == nil {
-		caps, err := s.occ.Capacities(ctx)
-		if err != nil {
-			log.Printf("capacities from occupancysim: %v (estimating from area)", err)
-		} else {
-			s.caps = caps
-		}
-	}
-	capacity, ok := s.caps[k.String()]
-	if !ok || capacity == 0 {
+	if capacity == 0 {
 		capacity = sizing.Capacity(area)
 	}
 	return registry.RoomInfo{AreaM2: area, Capacity: capacity}, nil

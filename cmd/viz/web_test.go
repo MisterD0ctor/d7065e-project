@@ -46,7 +46,8 @@ func TestPageAndItsRequests(t *testing.T) {
 	for m := range 5 {
 		v.board.Observe(reading(rooms.CO2, 600+float64(m), m))
 	}
-	v.board.Tick(map[rooms.Key]float64{a109: 8})
+	v.board.State(msg.State{Room: a109.String(), ModelTime: reading("", 0, 4).ModelTime, Actuator: rooms.Damper, Value: 8})
+	v.board.Tick()
 	srv := httptest.NewServer(v.handler())
 	defer srv.Close()
 

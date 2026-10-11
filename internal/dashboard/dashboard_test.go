@@ -51,7 +51,8 @@ func TestLayersShowTheLatestReadings(t *testing.T) {
 
 	k := rooms.Key{Level: "level0", Name: "1570"}
 	b.SetRooms(map[rooms.Key]sizing.Room{k: {Max: 300}})
-	b.Tick(map[rooms.Key]float64{k: 132}) // l/s: 44 % of the room's maximum
+	b.State(msg.State{Room: "level0/1570", ModelTime: at(1), Actuator: rooms.Damper, Value: 132, Unit: "l/s"}) // 44 % of the room's maximum
+	b.State(msg.State{Room: "level0/1570", ModelTime: at(1), Actuator: rooms.Heating, Value: 21, Unit: "°C"})  // not an airflow
 	layers := b.Layers()
 	for id, want := range map[string]float64{"co2": 712, "occupancy": 16, "temperature": 21.4, "occupancy_predicted": 18, "airflow": 44} {
 		l, ok := find(layers, id)

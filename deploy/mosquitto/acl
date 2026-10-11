@@ -1,13 +1,19 @@
 # Who may publish (write) and subscribe (read) what. Anything not listed is
-# denied. Only storage may read truth/#: the controller must never see the
-# truth (Lecture 2, slide 8; test T-27).
-
-user physics
-topic write truth/#
-topic write time/#
+# denied.
+#
+# The truth is in BuildSim, where the physical model keeps it. Only the
+# truth recorder brings it onto the broker, for the evaluation, and only
+# storage may read it there: the controller must never see the truth
+# (Lecture 2, slide 8; test T-27). The physical model and occupancysim are
+# not here at all: they talk to BuildSim and nothing else.
 
 user sensor
 topic write obs/#
+topic read time/#
+
+# The building's clock is a sensor too, and the only one that may tell the time.
+user clock
+topic write time/#
 
 user controller
 topic read obs/#
@@ -17,6 +23,10 @@ user actuator
 topic read obs/#
 topic read time/#
 topic write event/#
+topic write state/#
+
+user truthlog
+topic write truth/#
 
 user storage
 topic read obs/#
@@ -28,3 +38,4 @@ user viz
 topic read obs/#
 topic read decision/#
 topic read event/#
+topic read state/#

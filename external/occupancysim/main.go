@@ -102,6 +102,8 @@ func main() {
 		defer close(publisherDone)
 		publisher.Run(ctx)
 	}()
+	// The clock and the per-minute record, for readers that see only BuildSim.
+	go buildsim.NewClockPublisher(client, simulation).Run(ctx)
 
 	ui, err := fs.Sub(uiFS, "ui/dist")
 	if err != nil {

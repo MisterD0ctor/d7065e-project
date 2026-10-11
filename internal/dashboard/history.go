@@ -18,7 +18,9 @@ import (
 // minute, of what the system saw and did. It is kept in memory, because
 // storage answers a history query by reading the whole run (IF-10) and a
 // page that redraws every two seconds can't wait for that. After a restart
-// viz fills it again from storage (Backfill).
+// viz fills it again from storage (Backfill). Everything in it arrived on
+// MQTT from a sensor, the controller or an actuator: viz reads nothing from
+// BuildSim.
 
 const (
 	// Keep is how much history is held per room: a week of model minutes,
@@ -154,7 +156,7 @@ func (b *Board) BackfillObservation(o msg.Observation) {
 func (b *Board) BackfillDecision(d msg.Decision) {
 	t, err := time.Parse(time.RFC3339, d.ModelTime)
 	if err != nil {
-		return // decided in the REST fallback, without a model time
+		return
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -178,15 +180,11 @@ type LogEntry struct {
 
 var severityRank = map[string]uint8{"warning": 1, "critical": 2}
 
-// Tick brings the history up to the present. flows is the airflow each
-// damper has reached, in l/s, or nil if BuildSim could not be read. viz calls
-// it once per real second.
-func (b *Board) Tick(flows map[rooms.Key]float64) {
+// Tick brings the history up to the present: the airflow each damper last
+// reported, and the alerts. viz calls it once per real second.
+func (b *Board) Tick() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if flows != nil {
-		b.flows = flows
-	}
 	if b.newest.IsZero() {
 		return
 	}
@@ -209,8 +207,8 @@ func (b *Board) Tick(flows map[rooms.Key]float64) {
 			if p == nil {
 				continue
 			}
-			if f, ok := flows[k]; ok {
-				p.flow = float32(f)
+			if f, ok := b.flows[k]; ok && b.fresh(f) {
+				p.flow = float32(f.value)
 			}
 			p.severity = max(p.severity, worst[k])
 		}
@@ -273,7 +271,8 @@ func (c Column) MarshalJSON() ([]byte, error) {
 
 // RoomHistory is one room over a span of model time: a value per minute from
 // Start. The airflow and the setpoint are what the actuators accepted and
-// reached; everything else is a sensor reading or the controller's forecast.
+// reported reaching; everything else is a sensor reading or the controller's
+// forecast.
 type RoomHistory struct {
 	Room     string      `json:"room"`
 	Size     sizing.Room `json:"size"`
@@ -497,8 +496,8 @@ func (b *Board) Overview(minutes int) Overview {
 			Capacity: size.Capacity, DesignLs: size.Design, MaxLs: size.Max,
 			Severity: int(worst[k]), Spark: Column{},
 		}
-		if f, ok := b.flows[k]; ok {
-			now.FlowLs = &f
+		if f, ok := b.flows[k]; ok && b.fresh(f) {
+			now.FlowLs = &f.value
 		}
 		if r, ok := b.rooms[k]; ok {
 			for kind, dst := range map[string]**float64{rooms.CO2: &now.CO2, rooms.Occupancy: &now.People, rooms.Temp: &now.Temp} {

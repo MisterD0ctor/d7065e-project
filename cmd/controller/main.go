@@ -1,9 +1,9 @@
 // Command controller decides the airflow and heating setpoint per room (FR-3).
 // It learns the building from the registry: which rooms have a CO₂ sensor and
 // a damper, where to reach each actuator, and each room's sizing (IF-12). It
-// takes the observations from MQTT (IF-4) and falls back to polling BuildSim
-// when the broker is silent (D-3). Each decision is published for storage and
-// viz (IF-6). A sensor that keeps repeating itself is treated like one that
+// takes the observations from MQTT (IF-4), which is the only way it learns
+// anything about the building: it never talks to BuildSim (D-3). Each
+// decision is published for storage and viz (IF-6). A sensor that keeps repeating itself is treated like one that
 // is missing (FR-7, internal/stuck).
 package main
 
@@ -17,14 +17,13 @@ import (
 	"log"
 	"net/http"
 	"os/signal"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/MisterD0ctor/d7065e-project/internal/actuator"
-	"github.com/MisterD0ctor/d7065e-project/internal/buildsim"
+	"github.com/MisterD0ctor/d7065e-project/internal/dedup"
 	"github.com/MisterD0ctor/d7065e-project/internal/devreg"
 	"github.com/MisterD0ctor/d7065e-project/internal/env"
 	"github.com/MisterD0ctor/d7065e-project/internal/mqttx"
@@ -64,20 +63,15 @@ type plant struct {
 type controller struct {
 	policy string
 	reg    *devreg.Client
-	bs     *buildsim.Client
 	mq     *mqttx.Client
 	http   *http.Client
 	runID  string
-	dedup  *mqttx.Dedup
-
-	silence mqttx.Silence // when to stop waiting for MQTT and poll BuildSim
+	dedup  *dedup.Set
 
 	mu          sync.Mutex
 	lastRefresh time.Time // real time of the last registry read
 	plants      map[rooms.Key]plant
-	newest      time.Time            // newest model time seen on any observation
-	polled      map[string]time.Time // BuildSim timestamp of the last polled reading acted on, by device
-	fallback    bool
+	newest      time.Time           // newest model time seen on any observation
 	people      map[rooms.Key]count // latest occupancy count per room
 
 	sensors *stuck.Detector // which sensors keep repeating themselves (FR-7)
@@ -100,13 +94,11 @@ func main() {
 	c := &controller{
 		policy: policy,
 		reg:    devreg.New(env.String("REGISTRY_URL", "http://registry:8080")),
-		bs:     buildsim.New(env.String("BUILDSIM_URL", "http://buildsim:9090")),
 		mq:     mqttx.Connect("controller"),
 		http:   &http.Client{Timeout: 500 * time.Millisecond},
 		runID:  env.String("RUN_ID", "dev"),
-		dedup:  mqttx.NewDedup(),
+		dedup:  dedup.New(),
 		plants: map[rooms.Key]plant{},
-		polled: map[string]time.Time{},
 		people: map[rooms.Key]count{},
 
 		sensors: stuck.New(),
@@ -132,8 +124,6 @@ func main() {
 	c.mq.Subscribe("obs/+/+/"+rooms.Occupancy, func(_ string, p []byte) { c.onObservation(ctx, p) })
 	log.Printf("policy %s", policy)
 
-	tick := time.NewTicker(time.Second)
-	defer tick.Stop()
 	refresh := time.NewTicker(RefreshPlant)
 	defer refresh.Stop()
 	reload := time.NewTicker(ReloadModel)
@@ -146,8 +136,6 @@ func main() {
 			c.reloadModel(ctx)
 		case <-refresh.C:
 			c.refreshPlants(ctx)
-		case <-tick.C:
-			c.pollIfSilent(ctx)
 		}
 	}
 }
@@ -211,13 +199,7 @@ func (c *controller) onObservation(ctx context.Context, payload []byte) {
 	if err != nil {
 		return
 	}
-	c.silence.Arrived(time.Now())
-
 	c.mu.Lock()
-	if c.fallback {
-		log.Printf("observations back on MQTT; stopped polling BuildSim")
-		c.fallback = false
-	}
 	if t.After(c.newest) {
 		c.newest = t
 	}
@@ -228,49 +210,6 @@ func (c *controller) onObservation(ctx context.Context, payload []byte) {
 		return
 	}
 	c.act(ctx, k, o.SensorID, o.Kind, o.Value, t, o.ModelTime)
-}
-
-// pollIfSilent is the fallback path: with the broker down or silent, read the
-// sensors from BuildSim and act on readings not seen before. BuildSim has no
-// model time, so these commands carry no issued_at, and the heating rule uses
-// the last model time seen (IF-8).
-func (c *controller) pollIfSilent(ctx context.Context) {
-	silent := c.silence.Silent(time.Now())
-	c.mu.Lock()
-	if silent && !c.fallback {
-		log.Printf("observations on MQTT stopped; polling BuildSim")
-		c.fallback = true
-	}
-	plants := make(map[rooms.Key]plant, len(c.plants))
-	for k, p := range c.plants {
-		plants[k] = p
-	}
-	last := c.newest
-	c.mu.Unlock()
-	if !silent {
-		return
-	}
-	for k, p := range plants {
-		for kind, ids := range map[string][]string{rooms.CO2: p.co2Sensors, rooms.Temp: p.tempSens} {
-			for _, id := range ids {
-				s, err := c.bs.SensorValue(ctx, registry.SensorID(id))
-				if err != nil || s.Value == "" {
-					continue
-				}
-				v, err := strconv.ParseFloat(s.Value, 64)
-				if err != nil {
-					continue
-				}
-				c.mu.Lock()
-				isNew := s.Timestamp.After(c.polled[id])
-				c.polled[id] = s.Timestamp
-				c.mu.Unlock()
-				if isNew {
-					c.act(ctx, k, id, kind, v, last, "")
-				}
-			}
-		}
-	}
 }
 
 // reloadModel picks up a newer trained profile. Without any model the
@@ -291,8 +230,10 @@ func (c *controller) reloadModel(ctx context.Context) {
 // act decides and commands one room for one reading. A room whose sensor goes
 // quiet gets no commands, so its actuator's TTL expires and it falls back to
 // design flow or 21 °C: the degraded mode for a missing sensor (FR-7) needs
-// nothing from the controller. A sensor that is stuck keeps reporting, so
-// here the controller has to notice, and it commands that same fallback.
+// nothing from the controller. The same happens to every room if the broker
+// is lost: the controller has no other way to the building, by design. A
+// sensor that is stuck keeps reporting, so there the controller has to
+// notice, and it commands that same fallback.
 func (c *controller) act(ctx context.Context, k rooms.Key, sensor, kind string, value float64, t time.Time, modelTime string) {
 	p, ok := c.plant(k)
 	if !ok {
@@ -309,9 +250,7 @@ func (c *controller) act(ctx context.Context, k rooms.Key, sensor, kind string, 
 		c.mu.Lock()
 		c.people[k] = count{n: value, at: t}
 		c.mu.Unlock()
-		if modelTime != "" {
-			c.sensors.Count(k, t, value)
-		}
+		c.sensors.Count(k, t, value)
 		return
 	case rooms.CO2:
 		endpoint, unit = p.damper, "l/s"
@@ -321,9 +260,7 @@ func (c *controller) act(ctx context.Context, k rooms.Key, sensor, kind string, 
 			reason = "CO₂ sensor stuck: design flow"
 			break
 		}
-		if modelTime != "" {
-			c.sensors.CO2(k, t, value) // the counter is checked against it
-		}
+		c.sensors.CO2(k, t, value) // the counter is checked against it
 		people, m, f := c.peopleFor(k, p.size, t)
 		mode, fault = m, f
 		if c.forecast != nil {
@@ -331,7 +268,7 @@ func (c *controller) act(ctx context.Context, k rooms.Key, sensor, kind string, 
 			leadMin = lead.Minutes()
 			predicted = &people
 		}
-		target = airflow(c.policy, p.size, value, people)
+		target = airflow(c.policy, p.size, value, people, t)
 		reason = fmt.Sprintf("%s: CO₂ %.0f ppm", c.policy, value)
 		if predicted != nil {
 			reason += fmt.Sprintf(", %.0f people within %.0f min", people, leadMin)

@@ -73,7 +73,7 @@ type Board struct {
 	newest time.Time // newest model time seen on any message
 
 	sizes  map[rooms.Key]sizing.Room // from the registry
-	flows  map[rooms.Key]float64     // airflow each damper has reached, l/s
+	flows  map[rooms.Key]reading     // airflow each damper has reached, l/s
 	policy string                    // of the latest decision
 
 	lastTick int64                     // model minute of the last Tick
@@ -107,14 +107,14 @@ func (b *Board) room(key string) (rooms.Key, *room, bool) {
 func (b *Board) seen(modelTime string) time.Time {
 	t, err := time.Parse(time.RFC3339, modelTime)
 	if err != nil {
-		return b.newest // decisions made in the REST fallback carry no model time
+		return b.newest // a message without a usable model time: take it as now
 	}
 	if t.Before(b.newest.Add(-30 * time.Minute)) {
 		// The model clock was moved back, e.g. for a new experiment: start
 		// over. (Messages a little out of order are far inside this margin.)
 		b.rooms = map[rooms.Key]*room{}
 		b.newest = t
-		b.lastTick, b.active, b.log = 0, nil, nil
+		b.lastTick, b.active, b.log, b.flows = 0, nil, nil, nil
 	}
 	if t.After(b.newest) {
 		b.newest = t
@@ -191,6 +191,20 @@ func (b *Board) Event(e msg.Event) {
 	}
 }
 
+// State records what an actuator has reached (IF-9), as the actuator itself
+// reports it on MQTT. Only the dampers' airflow is shown.
+func (b *Board) State(st msg.State) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	t := b.seen(st.ModelTime)
+	if k, err := rooms.Parse(st.Room); err == nil && st.Actuator == rooms.Damper {
+		if b.flows == nil {
+			b.flows = map[rooms.Key]reading{}
+		}
+		b.flows[k] = reading{st.Value, t}
+	}
+}
+
 func (b *Board) fresh(r reading) bool { return b.newest.Sub(r.at) <= StaleAfter }
 
 // stuck returns what the controller found wrong with a sensor that is still
@@ -211,7 +225,7 @@ func (b *Board) stuck(r *room, kind string) string {
 }
 
 // Layers builds the heatmaps. The airflow is each damper's reached state
-// (Tick) as a share of the room's maximum (SetRooms). Rooms without a fresh
+// (State) as a share of the room's maximum (SetRooms). Rooms without a fresh
 // value are left out of a layer, and so are rooms whose sensor the controller
 // has found stuck: neither is a measurement. A layer nobody has values for is
 // left out altogether (the predicted occupancy, under a policy that doesn't
@@ -243,8 +257,8 @@ func (b *Board) Layers() []buildsim.RoomLayer {
 		}
 	}
 	for k, flow := range b.flows {
-		if most := b.sizes[k].Max; most > 0 {
-			air.Values[k.String()] = 100 * flow / most
+		if most := b.sizes[k].Max; most > 0 && b.fresh(flow) {
+			air.Values[k.String()] = 100 * flow.value / most
 		}
 	}
 

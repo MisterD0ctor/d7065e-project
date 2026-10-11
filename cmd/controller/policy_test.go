@@ -9,6 +9,8 @@ import (
 
 var lecture = sizing.ForCapacity(80, 40) // design 308 l/s, τ ≈ 12 min
 
+var noon = time.Date(2026, 9, 21, 12, 0, 0, 0, time.UTC) // a Monday
+
 func TestLeadTimeFollowsTheRoom(t *testing.T) {
 	if got := leadTime(lecture); got < 11*time.Minute || got > 13*time.Minute {
 		t.Errorf("lecture room lead %v, want ≈ 12 min", got)
@@ -21,23 +23,28 @@ func TestLeadTimeFollowsTheRoom(t *testing.T) {
 
 func TestPoliciesDiffer(t *testing.T) {
 	const cleanAir = 450.0
-	if got := airflow(Constant, lecture, cleanAir, 0); got != lecture.Design {
+	night := time.Date(2026, 9, 21, 23, 0, 0, 0, time.UTC)
+	sunday := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
+	if airflow(Constant, lecture, 1500, 40, night) != lecture.Empty || airflow(Constant, lecture, cleanAir, 0, sunday) != lecture.Empty {
+		t.Error("constant should run at the unoccupied minimum at night and at weekends, whatever the air is like")
+	}
+	if got := airflow(Constant, lecture, cleanAir, 0, noon); got != lecture.Design {
 		t.Errorf("constant: %v, want design %v", got, lecture.Design)
 	}
-	if got := airflow(Reactive, lecture, cleanAir, 30); got != lecture.Empty {
+	if got := airflow(Reactive, lecture, cleanAir, 30, noon); got != lecture.Empty {
 		t.Errorf("reactive ignores people: %v, want the lowest flow %v", got, lecture.Empty)
 	}
 	// 30 people expected, air still clean: predictive ventilates ahead.
 	want := sizing.PerPersonLs*30 + sizing.PerAreaLs*80
-	if got := airflow(Predictive, lecture, cleanAir, 30); got != want {
+	if got := airflow(Predictive, lecture, cleanAir, 30, noon); got != want {
 		t.Errorf("predictive with 30 expected: %v, want %v", got, want)
 	}
 	// Stale air with nobody expected: predictive still reacts to CO₂.
-	if got := airflow(Predictive, lecture, 1000, 0); got != lecture.Max {
+	if got := airflow(Predictive, lecture, 1000, 0, noon); got != lecture.Max {
 		t.Errorf("predictive at 1000 ppm: %v, want max %v", got, lecture.Max)
 	}
 	// More people than the room is sized for: capped at the maximum.
-	if got := airflow(Oracle, lecture, cleanAir, 100); got != lecture.Max {
+	if got := airflow(Oracle, lecture, cleanAir, 100, noon); got != lecture.Max {
 		t.Errorf("oracle with 100 expected: %v, want max %v", got, lecture.Max)
 	}
 }

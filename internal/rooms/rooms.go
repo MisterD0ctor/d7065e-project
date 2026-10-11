@@ -43,11 +43,12 @@ func ParseList(s string) ([]Key, error) {
 	return keys, nil
 }
 
-// Sensor kinds (IF-3).
+// Sensor kinds (IF-3). A clock is a sensor too: what it reads is the time.
 const (
 	CO2       = "co2"
 	Temp      = "temp"
 	Occupancy = "occupancy"
+	Clock     = "clock"
 )
 
 // Actuator kinds (IF-9).
@@ -66,6 +67,18 @@ var Sensors = map[string]SensorSpec{
 	CO2:       {"co2_sensor", "co2", "ppm"},
 	Temp:      {"temperature_sensor", "temperature", "°C"},
 	Occupancy: {"occupancy_counter", "occupancy", "persons"},
+	Clock:     {"bms_controller", "model_time", ""},
+}
+
+// SensorKind finds the sensor kind behind a BuildSim equipment type. The
+// physical model uses it to know what each piece of equipment measures.
+func SensorKind(equipmentType string) (string, bool) {
+	for kind, spec := range Sensors {
+		if spec.EquipmentType == equipmentType {
+			return kind, true
+		}
+	}
+	return "", false
 }
 
 type ActuatorSpec struct {

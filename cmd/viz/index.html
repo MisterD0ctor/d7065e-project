@@ -621,7 +621,7 @@ function drawBuilding(o) {
   for (const a of o.alerts) counts[RANK[a.severity]]++;
   $('tiles').replaceChildren(
     tile('People in the building', fmt(sum(r => r.people)), '', forecasting ? `ventilating for ${fmt(sum(r => r.expected))}` : 'counted by the room sensors'),
-    tile('Ventilation power', fmt(power, 1), 'kW', power == null || !o.constant_kw ? 'no airflow reported yet' : `fans and air heating; ${fmt(100 * power / o.constant_kw)} % of constant flow`),
+    tile('Ventilation power', fmt(power, 1), 'kW', power == null || !o.constant_kw ? 'no airflow reported yet' : `fans and air heating; ${fmt(100 * power / o.constant_kw)} % of design flow in every room`),
     tile('Rooms above ' + fmt(o.limits.co2_limit) + ' ppm', fmt(over.length), `of ${rooms.length}`, worst ? `highest: ${worst.name}, ${fmt(worst.co2)} ppm` : 'no CO₂ readings yet'),
     tile('Alerts', fmt(o.alerts.length), '', o.alerts.length ? [counts[2] && `${counts[2]} critical`, counts[1] && `${counts[1]} warning`, counts[0] && `${counts[0]} notice`].filter(Boolean).join(' · ') : 'none active'));
 

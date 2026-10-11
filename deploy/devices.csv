@@ -1,4 +1,5 @@
 id,kind,room
+clock-0001,clock,level0/1543
 co2-0001,co2,level0/1543
 temp-0001,temp,level0/1543
 occ-0001,occupancy,level0/1543

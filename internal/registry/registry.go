@@ -30,7 +30,7 @@ var idPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
 
 // Kinds a device can be.
 var Kinds = map[string]bool{
-	rooms.CO2: true, rooms.Temp: true, rooms.Occupancy: true,
+	rooms.CO2: true, rooms.Temp: true, rooms.Occupancy: true, rooms.Clock: true,
 	rooms.Damper: true, rooms.Heating: true,
 }
 
@@ -99,8 +99,9 @@ type RoomInfo struct {
 	Capacity int
 }
 
-// Install records a new device. roomInfo is looked up by the caller (from
-// BuildSim and occupancysim) and stored the first time a room is used.
+// Install records a new device. The room's area and capacity come from the
+// caller (the floor plan and the installer) and are stored the first time a
+// room is used.
 func (d *DB) Install(id, kind string, k rooms.Key, by string, info RoomInfo, now time.Time) (Device, error) {
 	if !idPattern.MatchString(id) {
 		return Device{}, fmt.Errorf("%w: id %q (letters, digits, '-' and '_')", ErrInvalid, id)

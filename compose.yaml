@@ -48,8 +48,8 @@ services:
     entrypoint: ["/bin/sh", "/deploy/entrypoint.sh"]
     environment:
       MQTT_PASSWORDS: >-
-        physics:physics-pw sensor:sensor-pw controller:controller-pw
-        actuator:actuator-pw storage:storage-pw viz:viz-pw
+        sensor:sensor-pw clock:clock-pw controller:controller-pw
+        actuator:actuator-pw storage:storage-pw viz:viz-pw truthlog:truthlog-pw
     volumes:
       - ./deploy/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro,z
       - ./deploy/mosquitto/acl:/mosquitto/config/acl:ro,z
@@ -72,19 +72,31 @@ services:
     depends_on: [mosquitto]
     restart: unless-stopped
 
+  # The physical model. BuildSim is all it talks to: no broker, no
+  # occupancysim, no run id.
   physics:
     build: { context: ., args: { CMD: physics } }
     environment:
       ROOMS: level0/1570   # the simulated rooms; compose.devices.yaml sets them
-      RUN_ID: ${RUN_ID:-dev}
       BUILDSIM_URL: http://buildsim:9090
-      CLOCK_URL: http://occupancysim:8081
-      MQTT_URL: tcp://mosquitto:1883
-      MQTT_USER: physics
-      MQTT_PASS: physics-pw
     depends_on:
       buildsim: { condition: service_healthy }
-      occupancysim: { condition: service_started }
+    restart: unless-stopped
+
+  # The evaluation's recorder: copies the physical model's room state from
+  # BuildSim to the truth topics, which only storage may read. Not part of
+  # the control system.
+  truthlog:
+    build: { context: ., args: { CMD: truthlog } }
+    environment:
+      RUN_ID: ${RUN_ID:-dev}
+      BUILDSIM_URL: http://buildsim:9090
+      MQTT_URL: tcp://mosquitto:1883
+      MQTT_USER: truthlog
+      MQTT_PASS: truthlog-pw
+    depends_on:
+      buildsim: { condition: service_healthy }
+      mosquitto: { condition: service_started }
     restart: unless-stopped
 
   registry:
@@ -92,7 +104,6 @@ services:
     environment:
       DB_PATH: /data/registry.db
       BUILDSIM_URL: http://buildsim:9090
-      CLOCK_URL: http://occupancysim:8081
     volumes:
       - registry-data:/data
     ports:
@@ -120,8 +131,7 @@ services:
       ORACLE_RUN: ${ORACLE_RUN:-}   # oracle only: the recorded run to replay
       STORAGE_URL: http://storage:8080
       REGISTRY_URL: http://registry:8080
-      BUILDSIM_URL: http://buildsim:9090
-      MQTT_URL: tcp://mosquitto:1883
+      MQTT_URL: tcp://mosquitto:1883   # no BuildSim: sensors are its only way to the building
       MQTT_USER: controller
       MQTT_PASS: controller-pw
     depends_on: [registry]

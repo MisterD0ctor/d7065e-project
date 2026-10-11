@@ -8,22 +8,19 @@ import (
 	"time"
 
 	"github.com/MisterD0ctor/d7065e-project/internal/buildsim"
-	"github.com/MisterD0ctor/d7065e-project/internal/clock"
 	"github.com/MisterD0ctor/d7065e-project/internal/rooms"
 	"github.com/MisterD0ctor/d7065e-project/internal/sizing"
 )
 
-// Sizes returns each room's sizing, retrying until BuildSim answers. Floor
-// areas come from BuildSim; capacities from occupancysim, falling back to an
-// estimate from the area if it can't be reached. A room that BuildSim doesn't
-// know is a configuration error.
-func Sizes(ctx context.Context, bs *buildsim.Client, clk *clock.Client, keys []rooms.Key) (map[rooms.Key]sizing.Room, error) {
-	caps, err := clk.Capacities(ctx)
-	if err != nil {
-		log.Printf("capacities from occupancysim: %v (estimating from area)", err)
-	}
+// Sizes returns each room's size, retrying until BuildSim answers. The floor
+// area, and with it the volume, comes from BuildSim's floor plan, which is
+// all the physical model needs. The capacity is estimated from the area: the
+// one the ventilation is sized by is commissioning data and lives in the
+// registry (IF-12). A room that BuildSim doesn't know is a configuration
+// error.
+func Sizes(ctx context.Context, bs *buildsim.Client, keys []rooms.Key) (map[rooms.Key]sizing.Room, error) {
 	for {
-		sizes, err := load(ctx, bs, caps, keys)
+		sizes, err := load(ctx, bs, keys)
 		if err == nil {
 			return sizes, nil
 		}
@@ -43,7 +40,7 @@ type missingRoom struct{ key rooms.Key }
 
 func (m missingRoom) Error() string { return fmt.Sprintf("room %s not found in BuildSim", m.key) }
 
-func load(ctx context.Context, bs *buildsim.Client, caps map[string]int, keys []rooms.Key) (map[rooms.Key]sizing.Room, error) {
+func load(ctx context.Context, bs *buildsim.Client, keys []rooms.Key) (map[rooms.Key]sizing.Room, error) {
 	floors := map[string]buildsim.Floor{}
 	sizes := map[rooms.Key]sizing.Room{}
 	for _, k := range keys {
@@ -57,12 +54,7 @@ func load(ctx context.Context, bs *buildsim.Client, caps map[string]int, keys []
 		}
 		for _, r := range floor.Rooms {
 			if r.Name == k.Name {
-				area := sizing.AreaM2(r.Area)
-				if c, ok := caps[k.String()]; ok && c > 0 {
-					sizes[k] = sizing.ForCapacity(area, c)
-				} else {
-					sizes[k] = sizing.For(area)
-				}
+				sizes[k] = sizing.For(sizing.AreaM2(r.Area))
 			}
 		}
 		if _, ok := sizes[k]; !ok {

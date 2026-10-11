@@ -16,14 +16,22 @@ x-device-env: &device-env
   RUN_ID: ${RUN_ID:-dev}
   REGISTRY_URL: http://registry:8080
   BUILDSIM_URL: http://buildsim:9090
-  PHYSICS_URL: http://physics:8080
-  CLOCK_URL: http://occupancysim:8081
   MQTT_URL: tcp://mosquitto:1883
 
 services:
   physics:
     environment:
       ROOMS: "level0/1543,level0/1570,level0/1572A,level0/1586,level0/1588,level0/A1001,level0/A1003,level0/A1007A,level0/A1014,level0/A1017,level0/A1022,level0/A1022A,level0/A1023,level0/A1025,level0/A105,level0/A108,level0/A109,level0/A110,level0/A1101,level0/A1112,level0/A1113,level0/A1115,level0/A1117B,level0/A1122,level0/A113C,level0/A117,level0/A119,level0/A123,level0/A1302,level0/A1306,level0/A133,level0/A1401,level0/A1402,level0/A144,level0/A148,level0/A1505,level0/A151,level0/A1511A,level0/A1512E,level0/A1514E,level0/A1519,level0/A1522,level0/A167,level0/A169,level0/A173,level0/A177,level0/A179,level0/A303,level0/A306,level0/A307"
+
+  clock-0001:  # clock in level0/1543
+    <<: *sensor
+    environment:
+      <<: *device-env
+      DEVICE_ID: clock-0001
+      DEVICE_KIND: clock
+      MQTT_USER: clock
+      MQTT_PASS: clock-pw
+      FAULT: ${FAULT_CLOCK_0001:-}
 
   co2-0001:  # co2 in level0/1543
     <<: *sensor

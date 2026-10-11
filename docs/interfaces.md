@@ -10,8 +10,15 @@ Conventions for every interface:
   repeat between floors, so a bare `A109` is a bug.
 - **Model time** is RFC 3339 exactly as occupancysim's clock gives it, e.g.
   `2026-09-14T10:15:00Z`. Wall time is used only for network timeouts.
-- **Run id**: every service gets `RUN_ID` from its environment and puts it in
-  every record it publishes or stores.
+- **Run id**: every service that publishes records gets `RUN_ID` from its
+  environment and puts it in each of them. The physical model and occupancysim
+  have none: they are the building, not an experiment.
+- **BuildSim is in the middle** (D-12). occupancysim and the physical model
+  talk to BuildSim and to nothing else. Of the control system, only the
+  sensor and actuator devices touch it, each at its own sensor or actuator.
+  The controller and storage have no BuildSim address.
+- **Nothing is retained on the broker.** A retained message outlives the run
+  that sent it. What a late subscriber needs is repeated by its publisher.
 - Values we write to BuildSim are **strings** (BuildSim's rule). Values on MQTT
   and our own HTTP APIs are JSON numbers.
 
@@ -19,29 +26,33 @@ Overview:
 
 | ID | Interface | Owner (writer) | Readers | Protocol |
 |---|---|---|---|---|
-| IF-1 | Model clock and occupancy per minute | occupancysim; physics relays the time on `time/model` | physics (REST); actuators (MQTT, REST fallback) | REST, MQTT |
-| IF-2 | Truth API | physics | sensor devices only | REST |
-| IF-3 | Sensor readings in BuildSim | each sensor device | controller and damper (fallback), viewer | REST |
+| IF-1 | Time: the simulation clock and people per minute in BuildSim; the building's time on `time/model` | occupancysim; physics; the clock device | physics (BuildSim); sensors and actuators (MQTT) | REST, MQTT |
+| IF-2 | (removed 2026-10-10: the truth API on physics, D-12) | – | – | – |
+| IF-3 | Sensor values in BuildSim | physics | each sensor device, its own value; viewer | REST |
 | IF-4 | Observations `obs/…` | each sensor device | controller, damper, storage, viz | MQTT |
-| IF-5 | Truth `truth/…` | physics | storage only | MQTT |
+| IF-5 | Truth: the physical model's record in BuildSim; `truth/…` | physics; truthlog | truthlog (BuildSim); storage only (MQTT) | REST, MQTT |
 | IF-6 | Decisions `decision/…` | controller | storage, viz | MQTT |
 | IF-7 | Actuator events `event/…` | actuators | storage, viz | MQTT |
 | IF-8 | Actuator command | controller | actuators | REST |
-| IF-9 | Actuator state in BuildSim | each actuator device | physics, viz, viewer | REST |
+| IF-9 | Actuator state: in BuildSim, and on `state/…` | each actuator device | physics (BuildSim); viz (MQTT); viewer | REST, MQTT |
 | IF-10 | Storage API | storage | controller, train, oracle, viz (at start), people | REST |
 | IF-11 | Room layers and alerts; the graphs page | viz | viewer; a browser | REST |
 | IF-12 | Device registry | registry | installer, devices, controller | REST |
 
 ---
 
-## IF-1. Model clock and occupancy per minute
+## IF-1. Time
 
-`GET http://occupancysim:8081/api/state` → `.sim.clock`
-(`time`, `minute_of_day`, `weekday`, `weekend`, `factor`, `running`).
+Three steps, each in a different place.
 
-`GET http://occupancysim:8081/api/minutes?after=2026-09-21T10:14:00Z` → the
-clock, and who was in each room at every whole model minute after `after`,
-oldest first (without `after`: the newest minute only, where a reader starts):
+**1. The simulation clock, in BuildSim.** BuildSim has no clock, so
+occupancysim keeps one there: a piece of equipment `sim-clock` with two text
+sensors (our addition, `external/README.md`).
+
+| Sensor | Value |
+|---|---|
+| `sim-clock-time` | The model time, `2026-09-21T10:16:00Z` |
+| `sim-clock-minutes` | The clock, and who was in each room at each of the last ten whole model minutes, oldest first |
 
 ```json
 {
@@ -58,91 +69,93 @@ oldest first (without `after`: the newest minute only, where a reader starts):
 - **Reproducible:** each entry is the state exactly on its minute, and
   occupancysim advances in fixed 5-second steps, so the sequence depends only
   on the day's plan. Every run of the same date gets the same minutes, at any
-  speed factor (NFR-7, T-25).
-- **Kept:** the last 240 minutes of the current day. A reader further behind
-  than that sees a gap and steps over it in one go.
-- This is our addition to occupancysim (`external/README.md`). Physics uses
-  it instead of BuildSim's `/api/occupancy`, which has no time attached and is
-  refreshed at most every 5 real seconds.
+  speed factor (NFR-7, T-25). BuildSim's own `/api/occupancy` could not give
+  that: it has no time attached and is refreshed at most every 5 real seconds.
+- **Rate:** occupancysim writes both sensors when it has recorded a new
+  minute, and every 5 real seconds otherwise (which is how a BuildSim that
+  restarted blank gets its clock back).
+- **Reader:** physics, every 250 ms real (`GET /api/sensors/sim-clock-minutes`).
+  It takes the minutes after the last one it stepped. Ten minutes of record
+  are 5 real seconds at factor 120, so it misses none.
+- **Stale:** a paused clock produces no new minutes, so physics does not
+  step. It never extrapolates. If the clock is moved back (a new experiment),
+  physics restarts from the newest minute.
+- **On failure:** physics holds its state and retries next tick. If it falls
+  more than ten minutes behind it steps over the gap in one go and says so.
 
-The same response lists `.sim.rooms[]` with each room's role and `capacity`.
-Physics and the registry read the capacities **once** to size the ventilation,
-because occupancysim decides which rooms are fika rooms (4 m² per person) and
-which are lecture rooms (2 m²). The registry stores the sizing with the room
-at installation, and devices and the controller get it from there (IF-12).
-Without occupancysim the capacity is estimated from the area.
-
-Physics relays the time on MQTT every tick, as a retained message on
-`time/model` (`{"model_time": "…", "factor": 60}`), the way a building network
-distributes time. The actuators use that instead of each polling
-occupancysim, and poll occupancysim only while the relay is silent.
-
-- **Rate:** physics asks for new minutes every 250 ms real, which is shorter
-  than a model minute lasts up to factor 240.
-- **Stale:** a paused or stuck clock produces no new minutes, so physics does
-  not step. It never extrapolates. If the clock is moved back (a new
-  experiment), physics restarts from the newest minute.
-- **On failure:** timeout 500 ms. Physics holds its state and retries next
-  tick; the minutes it missed are still in the record. Actuators keep their
-  targets but can't expire commands until the time is back.
-
-## IF-2. Truth API (physics)
-
-`GET http://physics:8080/rooms?room=level0/A109` (or `?level=level0`, or
-nothing for every room) →
+**2. The building's time, in BuildSim.** When physics has written a minute's
+sensor values (IF-3) and its record (IF-5), it writes that minute, last, to
+the sensor of every clock device:
 
 ```json
-{
-  "run_id": "pred-s42-2026-09-14",
-  "model_time": "2026-09-14T10:15:00Z",
-  "rooms": {
-    "level0/A109": {"co2_ppm": 612.4, "temp_c": 21.3, "occupancy": 6}
-  }
-}
+{"model_time": "2026-09-21T10:16:00Z", "factor": 120}
 ```
 
-- **Units:** ppm, °C, persons (guards included: a people counter can't tell).
-- `model_time` is always a whole model minute: the rooms' state at the latest
-  minute physics has computed.
-- **Rate:** each sensor polls every 250 ms real and takes a reading when
-  `model_time` has advanced by its sample period (60 model-s).
-- **Stale:** a sensor that gets the same `model_time` again does not publish a
-  new reading.
-- **On failure:** timeout 500 ms, no retry within the sample. The sensor
-  publishes nothing, so it goes stale downstream, which is what a dead device
-  looks like.
-- **Access:** only the sensors call it. This is a convention, not yet enforced:
-  the controller has no code that calls physics, but it shares the compose
-  network with it. Putting the truth layer on its own network would enforce
-  it (known limitation; the MQTT truth topic *is* enforced, IF-5).
-- Also `GET /healthz` for compose health checks.
+So the time a device can read is never ahead of the values: a clock that
+shows 10:16 means the 10:16 values are there.
 
-## IF-3. Sensor readings in BuildSim
+**3. The building's time, on `time/model`.** A clock device is a sensor
+device of kind `clock` (`clock-0001`). It reads its value every 100 ms real
+and publishes it, unchanged, on every change and once a real second
+otherwise. The repeat is a heartbeat: the time standing still (a paused
+model clock) is not the same as the clock being gone.
+
+- **Sensors** take a reading when the minute on `time/model` has advanced by
+  their sample period (IF-4).
+- **Actuators** count command TTLs and travel in this time. If no beat has
+  come for 5 real seconds (the clock device or the broker is gone) an
+  actuator keeps time itself, at the last `factor`, until the beat is back
+  (D-6). Its commands then expire and it goes to its safe default.
+- **The controller** needs no clock: it uses the model time on each
+  observation.
+
+## IF-2. (removed) Truth API on physics
+
+Until 2026-10-10 physics served the rooms' true state to the sensors over an
+HTTP API of its own (`GET /rooms`). The sensors now read their values from
+BuildSim (IF-3), and physics has no API (D-12).
+
+## IF-3. Sensor values in BuildSim
 
 The registry registers each installed device's equipment (IF-12) and
 re-registers it every 10 s (`POST /api/equipment/bulk` skips ids that exist),
 which restores everything after a BuildSim restart (FR-11). The equipment id
 is the device id the installer entered; the sensor inside gets a suffix:
 
-| Kind | Equipment id (example) | `type` | Sensor id | Unit | Value format |
+| Kind | Equipment id (example) | `type` | Sensor id | Unit | What physics writes |
 |---|---|---|---|---|---|
-| CO₂ | `co2-0001` | `co2_sensor` | `co2-0001-reading` | ppm | integer, `"612"` |
-| Temperature | `temp-0001` | `temperature_sensor` | `temp-0001-reading` | °C | one decimal, `"21.3"` |
-| Occupancy | `occ-0001` | `occupancy_counter` | `occ-0001-reading` | persons | integer, `"6"` |
+| CO₂ | `co2-0001` | `co2_sensor` | `co2-0001-reading` | ppm | the room's true CO₂, one decimal, `"612.4"` |
+| Temperature | `temp-0001` | `temperature_sensor` | `temp-0001-reading` | °C | the true temperature, two decimals, `"21.34"` |
+| Occupancy | `occ-0001` | `occupancy_counter` | `occ-0001-reading` | persons | the true head-count, `"6"` |
+| Clock | `clock-0001` | `bms_controller` | `clock-0001-reading` | – | the building's time (IF-1) |
 
-`PUT /api/sensors/{sensor_id}/value` with `{"data_type": "text", "value": "612"}`.
+`PUT /api/sensors/{sensor_id}/value` with `{"data_type": "text", "value": "612.4"}`.
 
-- **Rate:** one write per sensor per sample (60 model-s).
-- **Stale:** BuildSim stamps wall time. A reader using this fallback converts
-  with the clock `factor`: older than 3 samples (180 model-s) is stale (FR-7).
-- **On failure:** retry ×3 with 100 ms backoff, then drop the reading and log
-  it. A `404` means BuildSim has lost the equipment; the registry recreates it
-  within 10 s, so the device just drops that one reading.
+- **Owner: the physical model**, as in the lab quickstart. The value is what
+  is true at the device's place, not what the device reports. A sensor
+  device reads its own value (`GET /api/sensors/{sensor_id}`) and adds its
+  measurement error before it publishes (IF-4); it writes nothing here.
+- **Physics finds the sensors** by equipment `type` and room in
+  `GET /api/equipment?level=…`, the same call that gives it the actuator
+  states (IF-9), so it doesn't need the registry. A sensor in a room that is
+  not simulated gets no value.
+- **Rate:** one write per sensor per model minute, 16 at a time, then the
+  record, then the clocks.
+- **On failure:** no retry. A value that could not be written is simply not
+  updated this minute; physics logs how many. A `404` means BuildSim has lost
+  the equipment; the registry recreates it within 10 s.
+- **The control system does not read these values** except through the
+  sensor device that belongs to each. The viewer shows them, so a person
+  looking at a device in the 3D view sees the truth.
 
 ## IF-4. Observations `obs/<level>/<room>/<kind>`
 
-`kind` is `co2`, `temp` or `occupancy`. Published by the gateway right after
-its IF-3 write.
+`kind` is `co2`, `temp` or `occupancy`. This is the device's reading: the
+value at its place in BuildSim (IF-3) with the device's noise and any injected
+fault on top, rounded to the device's resolution (CO₂ and count to whole
+numbers, temperature to 0.1 °C). A sensor takes one when the building's time
+(IF-1) shows a new minute, so there is exactly one reading per sensor and
+model minute, stamped with that minute.
 
 ```json
 {
@@ -158,21 +171,30 @@ its IF-3 write.
 ```
 
 - **QoS 1, not retained.** Consumers **deduplicate on `(sensor_id, seq)`**,
-  because QoS 1 can deliver twice (course notes 2).
+  because QoS 1 can deliver twice (course notes 2). A duplicate is an exact
+  repeat of one of the sensor's last 16 readings; a reading that is merely
+  older than the newest is not one (the model clock can be moved back).
 - **Injected faults are not marked.** A stuck or drifting reading looks like
   any other; the controller has to detect it (FR-7). That is the point of the
   fault injection.
 - **Stale:** the consumer judges freshness by `model_time`, never by arrival
   time. Older than 180 model-s → stale.
-- **On failure (broker down):** the gateway still writes IF-3, so the
-  controller and the damper actuator fall back to polling BuildSim (D-3).
-  "Silent" means no observation for 2.5× the usual real-time gap between
-  them (at least 1.5 s). The threshold adapts because one model minute is
-  1 s real at factor 60 but 0.1 s at factor 600. It must stay below the
-  command TTL (IF-8), or an outage expires commands before the fallback
-  starts.
+- **On failure:** if BuildSim can't be read, or holds no value yet, the
+  sensor publishes nothing that minute and tries again at the next: it goes
+  stale downstream, which is what a dead device looks like. If the broker is
+  down nothing reaches the controller at all, and there is no other route:
+  no commands are sent, and the actuators take their safe defaults when the
+  ones they have expire (IF-1, IF-8, T-24).
 
-## IF-5. Truth `truth/<level>/<room>`
+## IF-5. Truth: the record in BuildSim, and `truth/<level>/<room>`
+
+The evaluation has to know what really happened. The physical model, which
+may write only to BuildSim, keeps the full state of every simulated room
+there: equipment `physics-state`, text sensor `physics-state-record`, holding
+the last five model minutes as `{"minutes": [{"model_time": …, "rooms": […]}]}`.
+`truthlog` reads it every 250 ms real and publishes each new minute's rooms
+on `truth/<level>/<room>`, adding the run id. Five minutes of record are
+2.5 real seconds at factor 120, so it misses none.
 
 ```json
 {
@@ -193,10 +215,17 @@ its IF-3 write.
 - **Rate:** one record per room at every whole model minute, at any speed
   factor: physics computes each minute occupancysim recorded (IF-1), also
   when it has to catch up.
-- **Access:** a Mosquitto ACL lets only `storage` subscribe to `truth/#`. The
-  boundary is enforced by deployment, not by trust (Lecture 2, slide 8).
-- **On failure:** physics doesn't buffer. Gaps in the truth show up in the
-  evaluation as missing minutes and are reported, not filled.
+- **Access:** `truthlog` is not part of the control system; it exists for the
+  evaluation and for the oracle baseline. A Mosquitto ACL lets only it write
+  `truth/#` and only `storage` read it. The controller can reach neither this
+  topic nor BuildSim (it is given no BuildSim address), so the boundary is
+  kept by deployment, not by trust (Lecture 2, slide 8). BuildSim itself has
+  no authentication: a process that was given its address could read the
+  record (known limitation, T-27).
+- **On failure:** nothing is buffered beyond the five minutes. If `truthlog`
+  is away longer, the minutes it missed are missing from the truth; it logs
+  the gap, and the evaluation reports missing minutes instead of filling them.
+  A new `truthlog` starts at the newest minute.
 
 ## IF-6. Decisions `decision/<level>/<room>`
 
@@ -286,19 +315,19 @@ Published on every change, not every tick.
   setpoint in °C (range 16 … 24).
 - **Safety (D-6):** the damper actuator clamps to the flow floor (0.35 l/s·m²
   occupied, 0.10 otherwise) and forces maximum flow while the latest CO₂
-  observation is above 1100 ppm, whatever the command says. `clamped: true`
+  observation (IF-4, from the room's sensor; never BuildSim's value) is above
+  1100 ppm, whatever the command says. `clamped: true`
   tells the controller this happened.
 - **Rate:** at most one command per room per control period.
 - **TTL:** if no valid command arrives within `ttl_s`, the actuator reverts to
   design flow (damper) or 21 °C (heating) and publishes `ttl_expired`.
-- **`issued_at` is optional while observations come over REST.** The
-  controller has no model time until IF-4 carries it, so the TTL counts from
-  the model time at which the actuator *accepted* the command. Once IF-4
-  exists, the controller sends `issued_at` = the observation's `model_time`.
+- **`issued_at`** is the `model_time` of the observation the command answers.
+  The actuator brings its own time up to date before it judges a command, so
+  the TTL is counted against the present and not against its last tick.
 - **On failure (controller side):** timeout 500 ms, retry the **same**
   `cmd_id` up to 3 times. Idempotency makes this safe.
 
-## IF-9. Actuator state in BuildSim
+## IF-9. Actuator state: in BuildSim, and on `state/<level>/<room>/<kind>`
 
 Registered by the registry, like IF-3:
 
@@ -314,9 +343,14 @@ Registered by the registry, like IF-3:
   has *reached*, not the target.
 - **Rate:** every 10 model-s while moving, then only on change.
 - **Physics side:** reads all states with one `GET /api/equipment?level=level0`
-  per tick and finds each room's damper and valve by equipment `type` and
+  per minute and finds each room's damper and valve by equipment `type` and
   room, so physics doesn't need the registry. Missing or unparsable state →
   keep the last value.
+- **On MQTT**, for the dashboard, which doesn't read BuildSim: the same
+  reached state as
+  `{"run_id": …, "room": "level0/1570", "model_time": …, "actuator": "damper", "value": 180.0, "unit": "l/s"}`,
+  on every change and once per model minute. `viz` treats a state older than
+  180 model-s as unknown, like a reading.
 
 ## IF-10. Storage API
 
@@ -332,8 +366,7 @@ Registered by the registry, like IF-3:
 `event`. `from` and `to` are model time.
 
 Storage validates every record before appending it: JSON, a safe `run_id`, a
-room, and an RFC 3339 `model_time` (decisions from the REST fallback may lack
-one). Bad records are logged and counted at `GET /healthz`, never silently
+room, and an RFC 3339 `model_time`. Bad records are logged and counted at `GET /healthz`, never silently
 dropped. Observations are deduplicated on `(run_id, sensor_id, seq)`.
 Published on `127.0.0.1:8090` for people and notebooks.
 
@@ -403,8 +436,8 @@ Open the viewer on a layer with
   the most of the count now and the forecast within the room's lead time
   (`predicted_occupancy` in IF-6). Under a policy that doesn't forecast the
   layer has no values and is left out.
-- **Airflow** is what the damper reports in BuildSim (IF-9) as a share of the
-  room's maximum from the registry (IF-12): an office's 20 l/s and a lecture
+- **Airflow** is what the damper reports having reached (IF-9, on MQTT) as a
+  share of the room's maximum from the registry (IF-12): an office's 20 l/s and a lecture
   room's 900 l/s would not fit one scale.
 - **A room drops out of a layer** when its reading is more than 180 model-s
   old, or when the controller has found that sensor stuck (IF-6): either
@@ -476,8 +509,8 @@ room, and at 12:16 the controller stops believing it.
 - **One value per model minute** from `start` (model time, Unix seconds). A
   minute in which nothing was seen is `null` and a hole in the line: never a
   zero, never the previous value.
-- **`flow`** is what the damper reports in BuildSim (IF-9), read once per real
-  second. **`target`** and **`setpoint`** are what the actuator accepted
+- **`flow`** is what the damper last reported having reached (IF-9, on MQTT).
+  A report older than 180 model-s no longer counts, and the line stops. **`target`** and **`setpoint`** are what the actuator accepted
   (status 202 in IF-6); a refused or lost command leaves a hole.
   **`expected`** is the decision's `predicted_occupancy`. **`severity`** is the
   worst alert in the room that minute: 0 none, 1 warning, 2 critical.
@@ -489,7 +522,7 @@ room, and at 12:16 the controller stops believing it.
   the energy proxy's constants (NFR-3) and the two parts of it that follow
   from the airflow alone. The radiators are left out: their power depends on
   the room's true temperature, which the dashboard never sees. "Every room at
-  design flow" is what the `constant` policy would use.
+  design flow" is what the `constant` policy uses in the occupied hours.
 - **Colours.** Blue is what was measured or reached, orange what the
   controller expected or commanded, in every graph. Limits are dashed grey
   lines with their label on the line. Yellow and red mean an alert and
@@ -512,7 +545,7 @@ The installer's record of what is installed where (D-10). Published on
 
 | Call | Who | Returns |
 |---|---|---|
-| `POST /devices {id, kind, room, installed_by}` | installer | `201` + the device. `409` if the id is taken, `422` if the kind is unknown, the id has characters other than letters, digits, `-` and `_`, or the room is not in the floor plan |
+| `POST /devices {id, kind, room, installed_by, capacity}` | installer | `201` + the device. `409` if the id is taken, `422` if the kind is unknown, the id has characters other than letters, digits, `-` and `_`, or the room is not in the floor plan. `capacity` (optional) is how many people the room is designed for; it counts for the first device in a room |
 | `GET /devices?kind=&room=&status=` | controller, people | The matching devices |
 | `GET /devices/{id}` | anyone | One device, or `404` |
 | `DELETE /devices/{id}` | installer | Retires it (`204`); it stays in the database, and its equipment is removed from BuildSim |
@@ -530,6 +563,13 @@ A device record:
 }
 ```
 
+- **Sizing:** a room's ventilation is sized from its floor area, which the
+  registry reads from BuildSim's floor plan, and its design capacity, which
+  the installer knows from the drawings (`deploy/rooms.csv` for
+  `cmd/install`). Without a capacity the registry estimates one from the
+  area, which takes any large room for a lecture room.
+- **Kinds:** `co2`, `temp`, `occupancy`, `clock` (sensors), `damper`,
+  `heating` (actuators).
 - **Boot:** a device checks in every 5 s until it gets `200`. Until then it
   publishes nothing and accepts no commands: it doesn't know its room.
 - **Kind check:** a device whose hardware kind differs from the registered kind

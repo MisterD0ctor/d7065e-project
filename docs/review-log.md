@@ -4,6 +4,75 @@ Two things the oral exam asks about (Lecture 1, slide 55): where AI advice was
 wrong and how we caught it, and why the design looks the way it does. Add an
 entry whenever either happens. Newest first.
 
+## 2026-10-10: the data path was the wrong shape
+
+Two days before the deadline Kasper saw that our data path is not the lab
+quickstart's. There, BuildSim is in the middle: the physical model and the
+occupancy sampler talk to BuildSim and to nothing else, sensor processes read
+their values from BuildSim, and the autonomous service knows the building
+only through them. Ours had four connections that diagram doesn't: physics
+called occupancysim, the sensors called physics, physics published on the
+broker, and the controller (and the damper's override) read BuildSim when the
+broker was silent. Reworked the same day; design in D-12, contracts in IF-1,
+IF-3, IF-5 and IF-9.
+
+| Finding | How it was caught | Fix |
+|---|---|---|
+| Physics, the actuators, the registry and the evaluator all called occupancysim's API; the sensors called physics; the controller and the dampers read BuildSim directly | Listing, per process, every address it is configured with and every client it creates | occupancysim keeps its clock and people-per-minute record in BuildSim; physics reads and writes only BuildSim; sensors read their own value there; the controller has no BuildSim address; room capacities come from the installer; the evaluator asks the registry |
+| BuildSim has no clock, and its occupancy collection carries no time | Reading its API for a place to put one | A text sensor is the only free-form slot the API has. occupancysim registers a `sim-clock` equipment and writes the time and the last ten minutes of its record there |
+| With physics unable to publish, the evaluation had no truth | Same listing | Physics keeps the rooms' full state in BuildSim as a record; a new process, `truthlog`, outside the control system, copies it to the truth topics |
+| A sensor that samples when occupancysim's clock shows a new minute races the physical model, which reacts to the same edge: the reading is sometimes the minute before | Thinking the timing through before writing the sensor | Physics writes the minute to the building's clock devices *after* that minute's values; the devices follow that clock, not occupancysim's. Measured at factor 120: 6 000 of 6 000 readings from each sensor kind, every sensor exactly once per minute (the old path missed 0.01–0.1 %) |
+| The days are still the same days | Counter readings of a check run on the new path against the truth recorded by the earlier evaluation, same Monday, five rooms: 875 readings, none off by more than the counter's own ±1, arrivals on the same minute | — |
+| At the start of the first scripted fault run every room showed "Command rejected: expired" | The run's alert log | The broker still held a *retained* time message from the previous run. The actuators' new clock (below) ran on from it, far ahead of the new run, and judged the first commands as long expired. Nothing is retained any more: the clock device repeats the time every real second instead, and an actuator brings its time up to date before judging a command |
+| **Storage was throwing away almost every reading of a run.** A sensor that starts in a new run can hear a leftover time first: the previous run's last minute is still on the building's clock in BuildSim, which is not restarted between runs. It reports once with that time under the new run id. Storage, and the controller, took any reading *older than the newest seen* for a duplicate, so that one stray reading made every later one of that sensor a "duplicate" | The second scripted fault run: 15 model minutes in, storage held one CO₂ reading for a room, stamped 12:50, and had counted 6 100 duplicates. The dashboard looked fine, because it is fed live | Two fixes. The duplicate check now remembers a sensor's last 16 readings and drops exact repeats only (`internal/dedup`). And a run is started in order (`deploy/start-run.sh`): stop everything of ours, restart the broker, set the clock, start the physical model and wait until the building's clock shows the start time, then start the rest. Checked on the next run: 24 of 24 readings from every sensor in the first 24 minutes, one duplicate (the sensor the test restarts) |
+| The scripts' wait for device check-ins crashed on a device that had never checked in | A traceback when the clock device was new | `last_seen` is absent for such a device; the scripts now allow for that |
+| Without the broker there is no second way to the controller any more | By design | The actuators keep time themselves once the clock's beat has been missing for 5 real seconds, so their commands still expire and they reach design flow. Tested with the clock device stopped and with the broker stopped (T-40, T-24) |
+| The first decision of a run can be `degraded_occupancy` for a minute: the room's CO₂ reading arrives before its first count | Alerts at 07:30 in the fault run | Not fixed. One decision per room at start-up; the next one is normal |
+| A frozen CO₂ sensor is found a minute later in the scripted test than before (09:35, not 09:34) | Comparing the two fault runs | Not a regression: the restarted sensor's first reading carries the same model minute as the last one from before, and the controller drops it as a duplicate |
+
+AI advice that was wrong here:
+- **The slide review of 2026-09-30** saw exactly this conflict ("the lab
+  quickstart diagram has the physics write sensor values into BuildSim and
+  sensor processes read them back") and recommended the lecture's shape
+  "because it keeps the truth out of BuildSim", naming the quickstart as the
+  rejected alternative. That put a truth API beside BuildSim. The lecture's
+  rule is that the *controller* must not see the truth, which needs no side
+  channel: don't give the controller BuildSim's address.
+- Three later pieces of advice built on it without questioning it: physics
+  relaying the model time on MQTT (D-1), the controller polling BuildSim as
+  its fallback (D-3), and, on 2026-10-06, a new endpoint on occupancysim for
+  physics to call, which fixed reproducibility by adding a connection the
+  lab's architecture doesn't have.
+- Today's first version of the actuator's own clock relied on a retained
+  time message for devices that start late. Retained messages outlive runs.
+- The duplicate check ("drop anything not newer than the newest") had been
+  in storage and the controller since the first MQTT version, with the
+  comment "readings from one sensor arrive in order, so the highest seq is
+  enough". True until time moves backwards, which it does at the start of
+  every run. On the old data path it cost a dev run its second pass (noted
+  on 2026-10-08 and not followed up); on the new one it would have left the
+  overnight evaluation with a training week of no readings. Caught only
+  because the fault run was checked in storage and not just on the dashboard.
+
+**The evaluation, rerun on the new path** (`-v4`, night to 2026-10-11):
+reactive 6 284 kWh, predictive 6 519, oracle 6 372, against 6 282, 6 521 and
+6 370 on the old path; the same four minutes over 1000 ppm under reactive and
+none under the other two; every head-count equal to the old runs' record by
+record. The rework changed the architecture and not the behaviour.
+
+**The `constant` baseline was changed the same evening**, at Kasper's
+request: design flow by the clock (weekdays 07–18) instead of around the
+clock. No building ventilates at full design flow through the night, and
+40 % of the old baseline's energy was exactly that. The saving the report
+can claim went from 75 % to 57–59 %, which is the honest number. The AI had
+built and evaluated the round-the-clock baseline three times without
+questioning it.
+
+What it cost: both evaluations and the fault tests had been measured on the
+old path and were run again (results in evaluation-results.md and the test
+plan). What stands outside the quickstart's diagram on purpose is listed at
+the end of D-12.
+
 ## 2026-10-09: graphs on the dashboard
 
 The dashboard was the BuildSim viewer's layers and alerts only (D-8, option

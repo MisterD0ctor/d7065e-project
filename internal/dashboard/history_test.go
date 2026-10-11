@@ -39,13 +39,18 @@ func airflow(room string, min int, target float64, status int, expected *float64
 	}
 }
 
+// reached is a damper reporting its airflow.
+func reached(room string, min int, flow float64) msg.State {
+	return msg.State{Room: room, ModelTime: at(min), Actuator: rooms.Damper, Value: flow, Unit: "l/s"}
+}
+
 func heating(room string, min int, setpoint float64) msg.Decision {
 	return msg.Decision{Room: room, ModelTime: at(min), Mode: "normal", SetpointTarget: &setpoint, AppliedTarget: setpoint, Status: 202}
 }
 
 // The graphs' data: one value per model minute, a hole where nothing was
-// seen. A command the actuator refused leaves no target, and a second when
-// BuildSim couldn't be read leaves no airflow.
+// seen. A command the actuator refused leaves no target, and a damper that
+// has stopped reporting leaves no airflow once its last report is stale.
 func TestRoomHistoryIsAPointPerMinute(t *testing.T) {
 	b := New()
 	b.SetRooms(map[rooms.Key]sizing.Room{r1570: sizing.ForCapacity(100, 25)})
@@ -56,14 +61,20 @@ func TestRoomHistoryIsAPointPerMinute(t *testing.T) {
 	b.Observe(obs(room, rooms.Temp, 21.3, 0))
 	b.Decide(airflow(room, 0, 140, 202, ptr(15)))
 	b.Decide(heating(room, 0, 21))
-	b.Tick(map[rooms.Key]float64{r1570: 120})
+	b.State(reached(room, 0, 120))
+	b.Tick()
 
 	b.Observe(obs(room, rooms.Occupancy, 13, 1)) // the CO₂ reading of this minute was lost
 	b.Decide(airflow(room, 1, 150, 0, nil))      // and the command didn't get through
-	b.Tick(map[rooms.Key]float64{r1570: 130})
+	b.State(reached(room, 1, 130))
+	b.Tick()
 
-	b.Observe(obs(room, rooms.CO2, 640, 2))
-	b.Tick(nil) // BuildSim not readable this second
+	// The damper goes quiet. Its last report stands for as long as a reading
+	// is valid, three minutes, and then the line stops.
+	for min := 2; min <= 5; min++ {
+		b.Observe(obs(room, rooms.CO2, 640, min))
+		b.Tick()
+	}
 
 	h, ok := b.RoomHistory(r1570, 60)
 	if !ok || h.Start != ten.Unix() || h.Step != 60 || h.Size.Capacity != 25 {
@@ -73,12 +84,12 @@ func TestRoomHistoryIsAPointPerMinute(t *testing.T) {
 		got  Column
 		want []float64
 	}{
-		"co2":      {h.CO2, []float64{600, none, 640}},
-		"people":   {h.People, []float64{12, 13, none}},
-		"expected": {h.Expected, []float64{15, none, none}},
-		"target":   {h.Target, []float64{140, none, none}},
-		"flow":     {h.Flow, []float64{120, 130, none}},
-		"setpoint": {h.Setpoint, []float64{21, none, none}},
+		"co2":      {h.CO2, []float64{600, none, 640, 640, 640, 640}},
+		"people":   {h.People, []float64{12, 13, none, none, none, none}},
+		"expected": {h.Expected, []float64{15, none, none, none, none, none}},
+		"target":   {h.Target, []float64{140, none, none, none, none, none}},
+		"flow":     {h.Flow, []float64{120, 130, 130, 130, 130, none}},
+		"setpoint": {h.Setpoint, []float64{21, none, none, none, none, none}},
 	} {
 		if !same(c.got, c.want...) {
 			t.Errorf("%s: %v, want %v", name, c.got, c.want)
@@ -88,7 +99,7 @@ func TestRoomHistoryIsAPointPerMinute(t *testing.T) {
 		t.Errorf("temperature: %v", h.Temp)
 	}
 	js, _ := json.Marshal(h)
-	if !strings.Contains(string(js), `"co2":[600,null,640]`) {
+	if !strings.Contains(string(js), `"co2":[600,null,640,640,640,640]`) {
 		t.Errorf("a missing minute should be null in JSON: %s", js)
 	}
 	if _, ok := b.RoomHistory(rA109, 60); ok {
@@ -158,7 +169,10 @@ func TestBuildingHistory(t *testing.T) {
 		b.Observe(obs(k.String(), rooms.Occupancy, v[0], 0))
 		b.Observe(obs(k.String(), rooms.CO2, v[1], 0))
 	}
-	b.Tick(map[rooms.Key]float64{r1570: 100, rA109: 10, rA123: 240})
+	for k, flow := range map[rooms.Key]float64{r1570: 100, rA109: 10, rA123: 240} {
+		b.State(reached(k.String(), 0, flow))
+	}
+	b.Tick()
 	// From here on only 1570 reports.
 	for min := 1; min <= 5; min++ {
 		b.Observe(obs(r1570.String(), rooms.Occupancy, 12, min))
@@ -190,15 +204,15 @@ func TestAlertLogAndSeverity(t *testing.T) {
 	b := New()
 	room := r1570.String()
 	b.Observe(obs(room, rooms.CO2, 1090, 0))
-	b.Tick(nil)
+	b.Tick()
 	b.Event(msg.Event{Room: room, ModelTime: at(1), Actuator: rooms.Damper, Kind: "override_co2", Detail: "CO₂ 1140 ppm > 1100"})
 	b.Observe(obs(room, rooms.CO2, 1140, 1))
-	b.Tick(nil)
+	b.Tick()
 	b.Observe(obs(room, rooms.CO2, 1120, 3))
-	b.Tick(nil)
+	b.Tick()
 	b.Event(msg.Event{Room: room, ModelTime: at(4), Actuator: rooms.Damper, Kind: "override_released"})
 	b.Observe(obs(room, rooms.CO2, 1080, 4))
-	b.Tick(nil)
+	b.Tick()
 
 	h, _ := b.RoomHistory(r1570, 60)
 	if got := h.Severity; len(got) != 5 || got[0] != 0 || got[1] != 2 || got[2] != 2 || got[3] != 2 || got[4] != 0 {
@@ -225,7 +239,8 @@ func TestOverviewListsEveryRegisteredRoom(t *testing.T) {
 	d := airflow(room, 0, 210, 202, ptr(9))
 	d.Mode, d.Fault = "degraded_co2", "CO₂ sensor has read 512 ppm 5 times in a row"
 	b.Decide(d)
-	b.Tick(map[rooms.Key]float64{r1570: 210})
+	b.State(reached(room, 0, 210))
+	b.Tick()
 
 	o := b.Overview(60)
 	if len(o.Rooms) != 2 || o.Rooms[0].Name != "1570" || o.Rooms[1].Name != "A109" {

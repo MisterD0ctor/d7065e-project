@@ -1,15 +1,24 @@
-// Package clock reads what occupancysim owns (IF-1): the model clock, the
-// room capacities, and who was in each room at every whole model minute.
+// Package clock reads the simulation clock from BuildSim (IF-1): the model
+// time, and who was in each room at every whole model minute. occupancysim
+// owns both and publishes them into BuildSim as the values of two text
+// sensors on a piece of equipment of its own; nothing of ours calls
+// occupancysim.
 package clock
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/url"
-	"strings"
 	"time"
+
+	"github.com/MisterD0ctor/d7065e-project/internal/buildsim"
+)
+
+// The BuildSim sensors occupancysim keeps (external/occupancysim,
+// internal/buildsim/clock.go).
+const (
+	TimeSensor    = "sim-clock-time"    // the model time, RFC 3339
+	MinutesSensor = "sim-clock-minutes" // the clock and the last minutes' occupancy, JSON
 )
 
 type Reading struct {
@@ -19,43 +28,7 @@ type Reading struct {
 	Weekend bool
 }
 
-type Client struct {
-	base string
-	http *http.Client
-}
-
-func New(baseURL string) *Client {
-	return &Client{
-		base: strings.TrimRight(baseURL, "/"),
-		http: &http.Client{Timeout: 500 * time.Millisecond},
-	}
-}
-
-func (c *Client) Now(ctx context.Context) (Reading, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/api/state", nil)
-	if err != nil {
-		return Reading{}, err
-	}
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return Reading{}, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return Reading{}, fmt.Errorf("clock: status %d", resp.StatusCode)
-	}
-	var state struct {
-		Sim struct {
-			Clock clockJSON `json:"clock"`
-		} `json:"sim"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&state); err != nil {
-		return Reading{}, err
-	}
-	return state.Sim.Clock.reading()
-}
-
-// clockJSON is occupancysim's clock as it appears in its responses.
+// clockJSON is occupancysim's clock as it appears in its documents.
 type clockJSON struct {
 	Time    string  `json:"time"`
 	Factor  float64 `json:"factor"`
@@ -86,71 +59,50 @@ type Minute struct {
 	Rooms map[string]RoomCount `json:"rooms"`
 }
 
-// Minutes returns the clock and the whole-minute occupancy occupancysim
-// recorded after the given model time, oldest first. A zero time returns only
-// the newest minute, which is where a reader starts. Each entry is the state
-// exactly on its minute and depends only on the day's plan, so every run of
-// the same date sees the same sequence (NFR-7), unlike BuildSim's occupancy,
-// which carries no time and is refreshed on a wall-clock schedule.
-func (c *Client) Minutes(ctx context.Context, after time.Time) (Reading, []Minute, error) {
-	u := c.base + "/api/minutes"
-	if !after.IsZero() {
-		u += "?after=" + url.QueryEscape(after.Format(time.RFC3339))
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+// Source is where a sensor's value is read: BuildSim.
+type Source interface {
+	SensorValue(ctx context.Context, sensorID string) (buildsim.Sensor, error)
+}
+
+// Minutes returns the clock and the whole-minute occupancy recorded after
+// the given model time, oldest first. A zero time returns only the newest
+// minute, which is where a reader starts.
+//
+// Each entry is the state exactly on its minute and depends only on the
+// day's plan, so every run of the same date sees the same sequence (NFR-7).
+// BuildSim's own occupancy collection could not give that: it carries no
+// time and is refreshed on a wall-clock schedule. The record holds the last
+// ten minutes, so a reader that polls a few times per real second misses
+// none; one that falls further behind sees a gap between its last minute and
+// the first one returned.
+func Minutes(ctx context.Context, src Source, after time.Time) (Reading, []Minute, error) {
+	s, err := src.SensorValue(ctx, MinutesSensor)
 	if err != nil {
-		return Reading{}, nil, err
+		return Reading{}, nil, fmt.Errorf("simulation clock in BuildSim: %w", err)
 	}
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return Reading{}, nil, err
+	if s.Value == "" {
+		return Reading{}, nil, fmt.Errorf("simulation clock in BuildSim: nothing written yet")
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return Reading{}, nil, fmt.Errorf("occupancysim minutes: status %d", resp.StatusCode)
-	}
-	var body struct {
+	var doc struct {
 		Clock   clockJSON `json:"clock"`
 		Minutes []Minute  `json:"minutes"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+	if err := json.Unmarshal([]byte(s.Value), &doc); err != nil {
+		return Reading{}, nil, fmt.Errorf("simulation clock in BuildSim: %w", err)
+	}
+	r, err := doc.Clock.reading()
+	if err != nil {
 		return Reading{}, nil, err
 	}
-	r, err := body.Clock.reading()
-	return r, body.Minutes, err
-}
-
-// Capacities returns occupancysim's design capacity per room, keyed
-// "<level>/<room>". occupancysim assigns the room roles (office, lecture,
-// fika), so its capacities are the ones to size the ventilation by.
-func (c *Client) Capacities(ctx context.Context) (map[string]int, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/api/state", nil)
-	if err != nil {
-		return nil, err
+	if after.IsZero() && len(doc.Minutes) > 0 {
+		return r, doc.Minutes[len(doc.Minutes)-1:], nil
 	}
-	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
-	if err != nil {
-		return nil, err
+	first := len(doc.Minutes)
+	for i, m := range doc.Minutes {
+		if m.Time.After(after) {
+			first = i
+			break
+		}
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("occupancysim: status %d", resp.StatusCode)
-	}
-	var state struct {
-		Sim struct {
-			Rooms []struct {
-				Name     string `json:"name"`
-				Level    string `json:"level"`
-				Capacity int    `json:"capacity"`
-			} `json:"rooms"`
-		} `json:"sim"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&state); err != nil {
-		return nil, err
-	}
-	out := map[string]int{}
-	for _, r := range state.Sim.Rooms {
-		out[r.Level+"/"+r.Name] = r.Capacity
-	}
-	return out, nil
+	return r, doc.Minutes[first:], nil
 }

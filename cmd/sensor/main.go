@@ -1,21 +1,26 @@
 // Command sensor is one sensor device (D-2). It knows only its own id and
 // what kind of hardware it is; at boot it checks in with the registry (IF-12)
 // to learn which room it was installed in, and does nothing until an
-// installer has registered it. Then, once per sample period, it samples its
-// room's truth from physics (IF-2), adds noise and any injected fault, writes
-// the reading to BuildSim (IF-3) and publishes it on MQTT (IF-4).
+// installer has registered it.
+//
+// It is the control system's only way to the building. Once per sample
+// period it reads the value at its place in BuildSim (IF-3), where the
+// physical model keeps it, adds its own measurement noise and any injected
+// fault, and publishes the reading on MQTT (IF-4). It writes nothing to
+// BuildSim: the value there is the building's, not the device's.
+//
+// A clock is a sensor too (kind "clock"). What it reads is the building's
+// time, and it publishes that on time/model, which is how every other device
+// knows what time it is (IF-1).
 package main
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"hash/fnv"
 	"log"
 	"math/rand/v2"
-	"net/http"
-	"net/url"
 	"os/signal"
 	"strconv"
 	"strings"
@@ -35,17 +40,21 @@ import (
 const (
 	// CheckInEvery is the heartbeat to the registry; it also notices retirement.
 	CheckInEvery = 30 * time.Second
-	// PollEvery is how often the sensor looks at physics, in real time.
-	PollEvery = 250 * time.Millisecond
+	// ClockPoll is how often a clock device looks at its value in BuildSim,
+	// in real time: several times per model minute at factor 120.
+	ClockPoll = 100 * time.Millisecond
+	// ClockBeat is how often a clock device repeats the time when it has not
+	// changed. The beat tells the other devices that the clock is alive and
+	// the time standing still, which is not the same as the clock being gone.
+	// It is also how a device that has just started learns the time: nothing
+	// is retained on the broker, so no device can pick up a time left over
+	// from an earlier run.
+	ClockBeat = time.Second
 )
 
-type truth struct {
-	ModelTime string `json:"model_time"`
-	Rooms     map[string]struct {
-		CO2       float64 `json:"co2_ppm"`
-		Temp      float64 `json:"temp_c"`
-		Occupancy int     `json:"occupancy"`
-	} `json:"rooms"`
+// building is the part of BuildSim a sensor uses: its own value.
+type building interface {
+	SensorValue(ctx context.Context, sensorID string) (buildsim.Sensor, error)
 }
 
 type sensor struct {
@@ -53,10 +62,8 @@ type sensor struct {
 	kind    string
 	room    rooms.Key
 	reg     *devreg.Client
-	bs      *buildsim.Client
+	bs      building
 	mq      *mqttx.Client
-	physics string
-	http    *http.Client
 	sample  time.Duration
 	inject  *faults.Injector
 	rng     *rand.Rand
@@ -72,7 +79,7 @@ func main() {
 	id := env.Must("DEVICE_ID")
 	kind := env.Must("DEVICE_KIND") // what the hardware is; the registry must agree
 	if !registry.IsSensor(kind) {
-		log.Fatalf("DEVICE_KIND=%q: want co2, temp or occupancy", kind)
+		log.Fatalf("DEVICE_KIND=%q: want co2, temp, occupancy or clock", kind)
 	}
 	reg := devreg.New(env.String("REGISTRY_URL", "http://registry:8080"))
 	dev, err := reg.WaitForCommissioning(ctx, id, "")
@@ -88,26 +95,39 @@ func main() {
 	log.Printf("device %s: %s sensor in %s", id, kind, room)
 
 	s := &sensor{
-		id:      id,
-		kind:    kind,
-		room:    room,
-		reg:     reg,
-		bs:      buildsim.New(env.String("BUILDSIM_URL", "http://buildsim:9090")),
-		mq:      mqttx.Connect(id),
-		physics: strings.TrimRight(env.String("PHYSICS_URL", "http://physics:8080"), "/"),
-		http:    &http.Client{Timeout: 500 * time.Millisecond},
-		sample:  time.Duration(env.Float("SAMPLE_S", 60) * float64(time.Second)),
-		inject:  faults.NewInjector(fault(env.String("FAULT", ""), room)),
-		rng:     rand.New(rand.NewPCG(seed(id), uint64(env.Float("SEED", 1)))),
-		runID:   env.String("RUN_ID", "dev"),
+		id:     id,
+		kind:   kind,
+		room:   room,
+		reg:    reg,
+		bs:     buildsim.New(env.String("BUILDSIM_URL", "http://buildsim:9090")),
+		mq:     mqttx.Connect(id),
+		sample: time.Duration(env.Float("SAMPLE_S", 60) * float64(time.Second)),
+		inject: faults.NewInjector(fault(env.String("FAULT", ""), room)),
+		rng:    rand.New(rand.NewPCG(seed(id), uint64(env.Float("SEED", 1)))),
+		runID:  env.String("RUN_ID", "dev"),
+	}
+	if kind == rooms.Clock {
+		s.runClock(ctx)
+		return
 	}
 
-	// Poll physics four times per physics tick. Polling at the same 1 Hz as
-	// physics updates aliases: a sensor whose phase lines up with the update
-	// sometimes reads one snapshot twice and then skips a minute (found in
-	// the 50-room run: temp-0017 missed ~1 reading in 5).
-	tick := time.NewTicker(PollEvery)
-	defer tick.Stop()
+	// The building's time arrives on MQTT from the clock device. Only the
+	// newest one matters: if the sensor is busy, older ones are dropped.
+	times := make(chan msg.ModelTime, 1)
+	s.mq.Subscribe(msg.TimeTopic, func(_ string, payload []byte) {
+		var m msg.ModelTime
+		if json.Unmarshal(payload, &m) != nil {
+			return
+		}
+		select {
+		case <-times:
+		default:
+		}
+		select {
+		case times <- m:
+		default:
+		}
+	})
 	heartbeat := time.NewTicker(CheckInEvery)
 	defer heartbeat.Stop()
 	for {
@@ -116,12 +136,102 @@ func main() {
 			return
 		case <-heartbeat.C:
 			s.checkIn(ctx)
-		case <-tick.C:
-			if !s.retired {
-				s.tick(ctx)
+		case m := <-times:
+			if t, err := time.Parse(time.RFC3339, m.ModelTime); err == nil && !s.retired && s.due(t) {
+				if o, ok := s.read(ctx, t); ok {
+					s.mq.Publish(msg.ObsTopic(s.room, s.kind), o)
+				}
 			}
 		}
 	}
+}
+
+// due reports whether it is time for a reading at model time t: a sample
+// period after the last one, or any time at all after the clock was moved back.
+func (s *sensor) due(t time.Time) bool {
+	return s.last.IsZero() || t.Before(s.last) || t.Sub(s.last) >= s.sample
+}
+
+// read takes one reading at model time t: the value at the device's place in
+// BuildSim, with the device's noise and fault on top. The clock shows a
+// minute only after the physical model has written that minute's values, so
+// what is read here belongs to t. ok is false if there is nothing to report:
+// no value yet, or a fault that silences the device.
+func (s *sensor) read(ctx context.Context, t time.Time) (msg.Observation, bool) {
+	raw, err := s.bs.SensorValue(ctx, registry.SensorID(s.id))
+	if err != nil {
+		// No retry inside a sample: a sensor that can't sense goes quiet,
+		// which is what a dead device looks like.
+		log.Printf("read: %v", err)
+		return msg.Observation{}, false
+	}
+	truth, err := strconv.ParseFloat(raw.Value, 64)
+	if err != nil {
+		return msg.Observation{}, false // the physical model has not written here yet
+	}
+	s.last = t
+	v, publish := s.inject.Apply(s.room, t, faults.Noise(s.kind, truth, s.rng))
+	if !publish {
+		return msg.Observation{}, false
+	}
+	// What the device reports is rounded to its resolution.
+	v, _ = strconv.ParseFloat(format(s.kind, v), 64)
+	return msg.Observation{
+		RunID:     s.runID,
+		SensorID:  s.id,
+		Room:      s.room.String(),
+		Kind:      s.kind,
+		Value:     v,
+		Unit:      rooms.Sensors[s.kind].Unit,
+		ModelTime: msg.FormatTime(t),
+		Seq:       t.Unix(),
+	}, true
+}
+
+// runClock is the clock device: it watches its value in BuildSim and
+// publishes the time whenever it changes, and once a second when it doesn't.
+func (s *sensor) runClock(ctx context.Context) {
+	poll := time.NewTicker(ClockPoll)
+	defer poll.Stop()
+	heartbeat := time.NewTicker(CheckInEvery)
+	defer heartbeat.Stop()
+	var shown string
+	var sent time.Time
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-heartbeat.C:
+			s.checkIn(ctx)
+		case <-poll.C:
+			if s.retired {
+				continue
+			}
+			m, raw, ok := s.readClock(ctx)
+			if !ok || (raw == shown && time.Since(sent) < ClockBeat) {
+				continue
+			}
+			s.mq.Publish(msg.TimeTopic, m)
+			shown, sent = raw, time.Now()
+		}
+	}
+}
+
+// readClock returns the time at the clock's place in BuildSim. A dropout
+// fault silences the clock like any other sensor.
+func (s *sensor) readClock(ctx context.Context) (m msg.ModelTime, raw string, ok bool) {
+	v, err := s.bs.SensorValue(ctx, registry.SensorID(s.id))
+	if err != nil || json.Unmarshal([]byte(v.Value), &m) != nil {
+		return m, "", false // not written yet, or BuildSim is away
+	}
+	t, err := time.Parse(time.RFC3339, m.ModelTime)
+	if err != nil {
+		return m, "", false
+	}
+	if _, publish := s.inject.Apply(s.room, t, 0); !publish {
+		return m, "", false
+	}
+	return m, v.Value, true
 }
 
 // fault turns FAULT (e.g. "stuck", "dropout", "drift:+50") into a fault on
@@ -163,101 +273,6 @@ func (s *sensor) checkIn(ctx context.Context) {
 	default:
 		s.retired = false
 	}
-}
-
-func (s *sensor) tick(ctx context.Context) {
-	tr, err := s.fetchTruth(ctx)
-	if err != nil {
-		// No retry inside a sample: a sensor that can't sense goes quiet,
-		// which is what a dead device looks like (IF-2).
-		log.Printf("truth: %v", err)
-		return
-	}
-	t, err := time.Parse(time.RFC3339, tr.ModelTime)
-	if err != nil {
-		log.Printf("truth: bad model_time %q", tr.ModelTime)
-		return
-	}
-	if !s.last.IsZero() && t.Sub(s.last) < s.sample && !t.Before(s.last) {
-		return
-	}
-	s.last = t
-	room, ok := tr.Rooms[s.room.String()]
-	if !ok {
-		log.Printf("%s: not simulated by physics", s.room)
-		return
-	}
-	var v float64
-	switch s.kind {
-	case rooms.CO2:
-		v = room.CO2
-	case rooms.Temp:
-		v = room.Temp
-	case rooms.Occupancy:
-		v = float64(room.Occupancy)
-	}
-	v = faults.Noise(s.kind, v, s.rng)
-	v, publish := s.inject.Apply(s.room, t, v)
-	if !publish {
-		return
-	}
-	value := format(s.kind, v)
-	s.write(ctx, value)
-	s.publish(t, value)
-}
-
-func (s *sensor) fetchTruth(ctx context.Context) (truth, error) {
-	var tr truth
-	u := s.physics + "/rooms?room=" + url.QueryEscape(s.room.String())
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return tr, err
-	}
-	resp, err := s.http.Do(req)
-	if err != nil {
-		return tr, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return tr, fmt.Errorf("status %d", resp.StatusCode)
-	}
-	return tr, json.NewDecoder(resp.Body).Decode(&tr)
-}
-
-// write retries ×3 with 100 ms backoff (IF-3). A 404 means BuildSim has lost
-// the equipment, e.g. after a restart; the registry recreates it within its
-// sync period, so the next sample gets through.
-func (s *sensor) write(ctx context.Context, value string) {
-	id := registry.SensorID(s.id)
-	for attempt := 1; attempt <= 3; attempt++ {
-		err := s.bs.SetSensorValue(ctx, id, value)
-		if err == nil {
-			return
-		}
-		if buildsim.IsNotFound(err) {
-			log.Printf("%s: not in BuildSim yet; the registry will recreate it", id)
-			return
-		}
-		log.Printf("%s: write attempt %d: %v", id, attempt, err)
-		time.Sleep(100 * time.Millisecond)
-	}
-	log.Printf("%s: reading dropped", id)
-}
-
-// publish sends the same reading on MQTT, after the BuildSim write: if the
-// broker is down, BuildSim still has it for the fallback path (D-3).
-func (s *sensor) publish(t time.Time, value string) {
-	v, _ := strconv.ParseFloat(value, 64)
-	s.mq.Publish(msg.ObsTopic(s.room, s.kind), msg.Observation{
-		RunID:     s.runID,
-		SensorID:  s.id,
-		Room:      s.room.String(),
-		Kind:      s.kind,
-		Value:     v,
-		Unit:      rooms.Sensors[s.kind].Unit,
-		ModelTime: msg.FormatTime(t),
-		Seq:       t.Unix(),
-	})
 }
 
 func format(kind string, v float64) string {

@@ -1,7 +1,8 @@
 # What the simulator sends to BuildSim
 
 The simulator reads a building from BuildSim once at start-up and then writes
-two collections to it for as long as it runs. This page is the complete wire
+two collections to it for as long as it runs, and keeps one piece of
+equipment there: its clock. This page is the complete wire
 contract: the HTTP calls, the JSON on them, and the rules BuildSim enforces.
 
 Base URL is `-buildsim` / `BUILDSIM_URL`, default `http://127.0.0.1:9090`.
@@ -12,10 +13,12 @@ Base URL is `-buildsim` / `BUILDSIM_URL`, default `http://127.0.0.1:9090`.
 | read | `GET /api/building/floors/{level}` | once per floor at start-up |
 | write | `PUT /api/entities` | every `publish_interval_ms` (1 s) |
 | write | `PUT /api/occupancy` | at most every `occupancy_interval_ms` (5 s), and only when it changed |
+| write | `POST /api/equipment/bulk` | once, to register the simulation clock, and again if BuildSim has lost it |
+| write | `PUT /api/sensors/sim-clock-minutes/value`, `PUT /api/sensors/sim-clock-time/value` | when a whole simulated minute has been recorded, and every 5 s otherwise |
 
-Both writes replace the **complete** collection, so the simulator must be the
-only writer of these two. Room layers, effects, equipment, and alerts are left
-to other tools.
+The two collection writes replace the **complete** collection, so the
+simulator must be the only writer of those. Room layers, effects, alerts, and
+all other equipment are left to other tools.
 
 ---
 
@@ -215,6 +218,42 @@ simulator reports `buildsim.last_occupancy` so you can see when it last went
 out.
 
 ---
+
+## The simulation clock: equipment `sim-clock`
+
+BuildSim has no clock, and the two collections above carry no simulated
+time. A reader that talks only to BuildSim could not know what time it is in
+the building, nor which minute an occupancy snapshot belongs to. So the
+simulator registers one piece of equipment (in the first room of the first
+floor, because BuildSim wants every piece of equipment in a room) with two
+text sensors, and keeps them current:
+
+```json
+[{
+  "id": "sim-clock", "name": "Simulation clock", "type": "generic", "category": "simulation",
+  "level": "level0", "room": "1540", "status": "running",
+  "sensors": [
+    {"id": "sim-clock-time", "name": "Simulated time", "type": "time", "data_type": "text"},
+    {"id": "sim-clock-minutes", "name": "People per room, last minutes", "type": "record", "data_type": "text"}
+  ],
+  "actuators": []
+}]
+```
+
+| Sensor | Value |
+|---|---|
+| `sim-clock-time` | The simulated time, RFC 3339: `2026-09-21T10:16:00Z` |
+| `sim-clock-minutes` | The JSON document `GET /api/minutes` returns, for the last ten whole minutes: the clock (`time`, `factor`, `running`, …) and, per minute, how many people are in each room and how many of them are guards |
+
+Both are written when the simulation has recorded a new whole minute (the
+record first, so a reader that sees the new time finds its minute), and every
+5 real seconds while nothing changes. The refresh is how a BuildSim that
+restarted blank is noticed: the write gets a `404`, and the equipment is
+registered again before the next one.
+
+The record holds ten minutes so that a reader who polls misses none: at
+factor 120 that is five real seconds. What it reads depends only on the
+day's plan, not on when it polled.
 
 ## Shutdown
 

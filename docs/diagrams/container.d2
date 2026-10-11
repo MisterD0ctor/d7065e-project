@@ -9,24 +9,32 @@ direction: down
 manager: "Facility manager\n[Person]\nWatches the building" {
   shape: person
 }
-bs: "BuildSim\n[Software System, from course]\nShared state: sensor values,\nactuator state, 3D viewer"
-occ: "occupancysim\n[Software System, course example, modified]\nPeople and the model clock" {
-  style.stroke-dash: 4
-}
 installer: "Installer\n[Person]\nMounts and registers devices" {
   shape: person
 }
+
+# The building, simulated. BuildSim is in the middle: the two simulators talk
+# to it and to nothing else (lab quickstart; D-12).
+building: "The simulated building" {
+  style.stroke-dash: 4
+  style.fill: transparent
+
+  bs: "BuildSim\n[Software System, from course]\nShared state: sensor values,\nactuator states, people, 3D viewer"
+  occ: "occupancysim\n[Software System, course example, modified]\nPeople and the model clock"
+  physics: "physics\n[Container: Go, ours]\nThe physical model: CO₂ and\nheat balance per room"
+}
+
+truthlog: "truthlog\n[Container: Go]\nEvaluation recorder,\noutside the control system"
 
 sys: "Ventilation Control  [System]" {
   style.stroke-dash: 4
   style.fill: transparent
 
-  physics: "physics\n[Container: Go]\nCO₂ and heat balance per room;\nserves the truth, relays model time"
   registry: "registry\n[Container: Go + SQLite]\nInstalled devices, rooms, sizing" {
     shape: cylinder
   }
-  sensors: "Sensor devices ×3 per room\nco2-NNNN · temp-NNNN · occ-NNNN\n[One container each: Go]\nSample truth, add noise and faults"
-  broker: "mosquitto\n[MQTT broker]\nobs · truth · decision · event · time" {
+  sensors: "Sensor devices ×3 per room, and one clock\nco2-NNNN · temp-NNNN · occ-NNNN · clock-0001\n[One container each: Go]\nRead their value, add noise and faults, report"
+  broker: "mosquitto\n[MQTT broker]\nobs · time · decision · state · event · truth" {
     shape: queue
   }
   controller: "controller\n[Container: Go]\nValidate → predict → act"
@@ -38,29 +46,38 @@ sys: "Ventilation Control  [System]" {
   viz: "viz\n[Container: Go]\nDashboard: layers and alerts in the\nviewer; its own page with graphs"
 }
 
-installer -> sys.registry: "Registers id, kind, room [REST / web form]"
-occ -> bs: "Occupancy, entities [REST]"
-occ -> sys.physics: "Clock, occupancy per minute [REST]"
-bs -> sys.physics: "Actuator state [REST]"
+# The simulated building
+building.occ -> building.bs: "People; the clock and people per minute [REST]"
+building.physics -> building.bs: "True value at every sensor; room-state record [REST]"
+building.bs -> building.physics: "Clock, people per minute, actuator states [REST]"
+
+# The only ways between the control system and the building
+building.bs -> sys.sensors: "Each its own value [REST]"
+sys.actuators -> building.bs: "Each its own reached state [REST]"
+sys.registry -> building.bs: "The devices' equipment records [REST]"
+sys.viz -> building.bs: "Room layers, alerts [REST]"
+
+# Inside the control system
+installer -> sys.registry: "Registers id, kind, room, capacity [REST / web form]"
 sys.sensors -> sys.registry: "Check in, learn room [REST]"
 sys.actuators -> sys.registry: "Check in, advertise address [REST]"
 sys.controller -> sys.registry: "Rooms, actuator addresses [REST]"
-sys.registry -> bs: "Equipment records [REST]"
-sys.sensors -> sys.physics: "Truth per room [REST]"
-sys.sensors -> bs: "Readings [REST]"
-sys.sensors -> sys.broker: "obs/# [MQTT]"
-sys.physics -> sys.broker: "truth/# [MQTT]"
+sys.sensors -> sys.broker: "obs/#; the clock: time/model [MQTT]"
 sys.broker -> sys.controller: "obs/# [MQTT]"
 sys.controller -> sys.broker: "decision/# [MQTT]"
 sys.controller -> sys.actuators: "Commands [REST]"
-sys.broker -> sys.actuators: "CO₂ for the override, model time [MQTT]"
-sys.actuators -> bs: "Reached state [REST]"
-sys.broker -> sys.storage: "obs, truth, decisions [MQTT]"
+sys.broker -> sys.actuators: "CO₂ for the override, the time [MQTT]"
+sys.actuators -> sys.broker: "state/#, event/# [MQTT]"
+sys.broker -> sys.storage: "obs, truth, decisions, events [MQTT]"
 sys.storage -> sys.controller: "Latest model [REST]"
 sys.train <-> sys.storage: "History in, model out [REST]"
-sys.broker -> sys.viz: "obs, decisions, events [MQTT]"
-sys.viz -> bs: "Room layers, alerts; reads the dampers' state [REST]"
+sys.broker -> sys.viz: "obs, decisions, states, events [MQTT]"
 sys.viz -> sys.storage: "The run so far, after a restart [REST]"
+sys.viz -> sys.registry: "Each room's sizing [REST]"
+
+# The evaluation
+building.bs -> truthlog: "Room-state record [REST]"
+truthlog -> sys.broker: "truth/#, for storage only [MQTT]"
+
 manager -> sys.viz: "Graphs over time [web page]"
-manager -> bs: "3D view, alerts [web page]"
-sys.viz -> sys.registry: "Each room's maximum flow [REST]"
+manager -> building.bs: "3D view, alerts [web page]"

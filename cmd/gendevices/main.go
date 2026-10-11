@@ -26,6 +26,10 @@ var perRoom = []struct{ kind, prefix string }{
 	{"damper", "damper"}, {"heating", "heat"},
 }
 
+// The building has one clock. It is a sensor like the others: it reads the
+// time where the physical model keeps it, in BuildSim, and tells the rest.
+const clockID, clockKind = "clock-0001", "clock"
+
 func main() {
 	plan := flag.Int("plan", 0, "pick this many rooms and write the installation list")
 	fika := flag.String("fika", "1570,A1023,A117", "occupancysim's fika rooms on the level (always included)")
@@ -45,7 +49,7 @@ func main() {
 		if err := writeList(*list, keys); err != nil {
 			log.Fatal(err)
 		}
-		fmt.Printf("wrote %s: %d rooms, %d devices\n", *list, len(keys), len(keys)*len(perRoom))
+		fmt.Printf("wrote %s: %d rooms, %d devices\n", *list, len(keys), len(keys)*len(perRoom)+1)
 	}
 	devices, err := readList(*list)
 	if err != nil {
@@ -115,6 +119,9 @@ func writeList(path string, keys []string) error {
 	defer f.Close()
 	w := csv.NewWriter(f)
 	w.Write([]string{"id", "kind", "room"})
+	if len(keys) > 0 {
+		w.Write([]string{clockID, clockKind, keys[0]})
+	}
 	for i, k := range keys {
 		for _, d := range perRoom {
 			w.Write([]string{fmt.Sprintf("%s-%04d", d.prefix, i+1), d.kind, k})
@@ -166,8 +173,6 @@ x-device-env: &device-env
   RUN_ID: ${RUN_ID:-dev}
   REGISTRY_URL: http://registry:8080
   BUILDSIM_URL: http://buildsim:9090
-  PHYSICS_URL: http://physics:8080
-  CLOCK_URL: http://occupancysim:8081
   MQTT_URL: tcp://mosquitto:1883
 
 services:
@@ -175,6 +180,9 @@ services:
 	seen := map[string]bool{}
 	var roomsList []string
 	for _, d := range devices {
+		if d.kind == clockKind {
+			continue // the clock hangs in a room, but doesn't make it a simulated one
+		}
 		if !seen[d.room] {
 			seen[d.room] = true
 			roomsList = append(roomsList, d.room)
@@ -183,9 +191,14 @@ services:
 	fmt.Fprintf(&b, "  physics:\n    environment:\n      ROOMS: %q\n\n", strings.Join(roomsList, ","))
 
 	for _, d := range devices {
+		// The broker user decides what a device may publish (deploy/mosquitto/acl):
+		// only the clock may tell the time.
 		anchor, user := "sensor", "sensor"
-		if d.kind == "damper" || d.kind == "heating" {
+		switch d.kind {
+		case "damper", "heating":
 			anchor, user = "actuator", "actuator"
+		case clockKind:
+			user = "clock"
 		}
 		envName := "FAULT_" + strings.ToUpper(strings.ReplaceAll(d.id, "-", "_"))
 		fmt.Fprintf(&b, "  %s:  # %s in %s\n    <<: *%s\n    environment:\n      <<: *device-env\n", d.id, d.kind, d.room, anchor)

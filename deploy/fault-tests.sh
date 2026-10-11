@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# The sensor-fault tests of the test plan in one run: a stuck temperature
-# sensor and a stuck CO₂ sensor (T-36), a silent CO₂ sensor (T-13) and an
-# occupancy counter stuck during a lecture (T-12).
+# The fault tests of the test plan in one run: a stuck temperature sensor and
+# a stuck CO₂ sensor (T-36), a silent CO₂ sensor (T-13), the building's clock
+# device lost (T-40), the broker lost (T-24), and an occupancy counter stuck
+# during a lecture (T-12).
 #
 #   deploy/fault-tests.sh fault-tests 2>&1 | tee results/fault-tests.log
 #
@@ -11,8 +12,9 @@
 # same day every time (NFR-7), so the run can be repeated: the lecture in
 # A1519 (53 people, 10:07 to 12:00) is always there.
 #
-# The log lists every change of the dashboard's alerts with its model time.
-# The decisions are in storage under the run id.
+# The log lists every change of the dashboard's alerts with its model time,
+# and one damper's airflow around the two outages. The decisions are in
+# storage under the run id.
 set -euo pipefail
 
 run_id=${1:?usage: deploy/fault-tests.sh RUN_ID}
@@ -25,6 +27,8 @@ now() { curl -sf http://127.0.0.1:8081/api/state | python3 -c "import sys,json; 
 log() { echo "$(now) [$run_id] $*"; }
 wait_until() { while [[ $(now) < $1 ]]; do sleep 0.2; done; } # model time, hh:mm
 device() { awk -F, -v kind="$1" -v room="$2" '$2 == kind && $3 == room { print $1 }' deploy/devices.csv; }
+# What a damper has reached, as it reports it in BuildSim (l/s).
+airflow() { curl -sf "http://127.0.0.1:9090/api/actuators/$1-state" | python3 -c "import sys,json; print(json.load(sys.stdin)['state'])"; }
 
 # Runs a command with the clock paused. Recreating a sensor takes a few
 # seconds, which is as many model-minutes at factor 60: without the pause the
@@ -71,27 +75,10 @@ temp=$(device temp level0/1570)
 co2=$(device co2 level0/1570)
 silent=$(device co2 level0/1543)
 counter=$(device occupancy level0/A1519)
+clockdev=$(awk -F, '$2 == "clock" { print $1; exit }' deploy/devices.csv)
+damper=$(device damper level0/1570)
 
-echo "$(date +%T) [$run_id] starting the stack at Monday 07:30, POLICY=predictive"
-# As in evaluate.sh: stop physics before the clock moves, so nothing is
-# recorded at the new start time under the previous run id.
-docker compose stop physics >/dev/null 2>&1 || true
-post '{"running": false}'
-post '{"date": "2026-09-21", "time": "07:30", "factor": 60}'
-t0=$(date -u +%s)
-RUN_ID=$run_id POLICY=predictive ORACLE_RUN= docker compose up -d >/dev/null 2>&1
-
-want=$(($(wc -l < deploy/devices.csv) - 1))
-for _ in $(seq 120); do
-  seen=$(curl -sf "http://127.0.0.1:8070/devices?status=active" |
-         T0=$t0 python3 -c "import os,sys,json,datetime as d
-t0=int(os.environ['T0'])
-print(sum(1 for x in json.load(sys.stdin) if x['last_seen'] and d.datetime.fromisoformat(x['last_seen'].replace('Z','+00:00')).timestamp()>=t0))" || echo 0)
-  [ "$seen" -ge "$want" ] && break
-  sleep 2
-done
-echo "$(date +%T) [$run_id] $seen of $want devices checked in"
-sleep 10 # let the controller read the registry and the model
+deploy/start-run.sh "$run_id" predictive 2026-09-21 07:30 60
 
 watch_alerts &
 watcher=$!
@@ -111,6 +98,23 @@ docker compose stop "$silent" >/dev/null 2>&1
 wait_until 08:50
 log "T-13: starting $silent again"
 paused docker compose start "$silent"
+
+# The two outages. In both, no device hears the time any more; the actuators
+# keep time themselves, their commands run out, and they go to design flow.
+wait_until 08:55
+log "T-40: stopping $clockdev (the building's clock); $damper is at $(airflow "$damper") l/s"
+docker compose stop "$clockdev" >/dev/null 2>&1
+wait_until 09:04
+log "T-40: nine minutes without the clock: $damper is at $(airflow "$damper") l/s; starting $clockdev again"
+docker compose start "$clockdev" >/dev/null 2>&1
+wait_until 09:10
+log "T-24: stopping the broker; $damper is at $(airflow "$damper") l/s"
+docker compose stop mosquitto >/dev/null 2>&1
+wait_until 09:19
+log "T-24: nine minutes without the broker: $damper is at $(airflow "$damper") l/s; starting it again"
+docker compose start mosquitto >/dev/null 2>&1
+wait_until 09:25
+log "after both: $damper is at $(airflow "$damper") l/s"
 
 wait_until 09:30
 log "T-36: freezing $co2 (CO₂, room 1570; people come at 09:40)"

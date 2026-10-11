@@ -63,13 +63,12 @@ func (cl *Client) Up() bool { return cl.up.Load() }
 
 // Publish sends v as JSON. It doesn't wait for the broker: a lost message is
 // a gap in the record, not a reason to stall the control loop.
-func (cl *Client) Publish(topic string, v any) { cl.publish(topic, v, false) }
-
-// PublishRetained is for state a new subscriber needs at once, like the
-// model time: the broker hands the last value to anyone who subscribes.
-func (cl *Client) PublishRetained(topic string, v any) { cl.publish(topic, v, true) }
-
-func (cl *Client) publish(topic string, v any, retained bool) {
+//
+// Nothing is ever retained on the broker: a retained message outlives the run
+// that sent it, and a device that starts in the next run would take it for
+// current. (A retained model time did exactly that to the actuators.) What a
+// late subscriber needs at once is repeated by its publisher instead.
+func (cl *Client) Publish(topic string, v any) {
 	if !cl.Up() {
 		return
 	}
@@ -78,7 +77,7 @@ func (cl *Client) publish(topic string, v any, retained bool) {
 		log.Printf("mqtt: marshal for %s: %v", topic, err)
 		return
 	}
-	cl.c.Publish(topic, qos, retained, b)
+	cl.c.Publish(topic, qos, false, b)
 }
 
 // Subscribe registers a handler; it is re-subscribed after every reconnect.
@@ -92,67 +91,4 @@ func (cl *Client) Subscribe(filter string, handle func(topic string, payload []b
 			log.Printf("mqtt: subscribe %s: %v", filter, t.Error())
 		}
 	}
-}
-
-// Dedup remembers (key, seq) pairs to drop QoS 1 redeliveries.
-type Dedup struct {
-	mu   sync.Mutex
-	last map[string]int64
-}
-
-func NewDedup() *Dedup { return &Dedup{last: map[string]int64{}} }
-
-// Fresh reports whether seq is newer than anything seen for key, and records
-// it. Readings from one sensor arrive in order, so the highest seq is enough.
-func (d *Dedup) Fresh(key string, seq int64) bool {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if seq <= d.last[key] {
-		return false
-	}
-	d.last[key] = seq
-	return true
-}
-
-// Silence detects that a stream which normally arrives at a steady rate has
-// stopped. The threshold follows the observed arrival interval, because one
-// model minute is 1 s real at factor 60 but 0.1 s at factor 600: a fixed
-// threshold in real time would be wrong at one of them. It must stay well
-// below the actuators' command TTL, or a broker outage expires commands
-// before the fallback starts (found by test T-24).
-type Silence struct {
-	mu       sync.Mutex
-	last     time.Time
-	interval time.Duration // smoothed real time between arrivals
-}
-
-const (
-	silenceFactor = 2.5
-	minSilence    = 1500 * time.Millisecond
-)
-
-// Arrived records one message at real time now.
-func (s *Silence) Arrived(now time.Time) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if !s.last.IsZero() {
-		gap := now.Sub(s.last)
-		if s.interval == 0 {
-			s.interval = gap
-		} else {
-			s.interval = (4*s.interval + gap) / 5
-		}
-	}
-	s.last = now
-}
-
-// Silent reports whether nothing has arrived for longer than expected.
-func (s *Silence) Silent(now time.Time) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.last.IsZero() {
-		return true
-	}
-	limit := max(time.Duration(float64(s.interval)*silenceFactor), minSilence)
-	return now.Sub(s.last) > limit
 }

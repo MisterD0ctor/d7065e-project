@@ -43,7 +43,7 @@ func TestAdvanceUsesOccupancyAtTheStartOfTheMinute(t *testing.T) {
 	if got := w.models[fika].CO2; got != sizing.OutdoorCO2 {
 		t.Errorf("09:00–09:01 was empty at its start, but CO₂ rose to %.1f", got)
 	}
-	if tr := w.truth("r", fika); tr.Occupancy != 20 || tr.ModelTime != "2026-09-21T09:01:00Z" {
+	if tr := w.truth(fika); tr.Occupancy != 20 || tr.ModelTime != "2026-09-21T09:01:00Z" {
 		t.Errorf("truth at 09:01: %+v", tr)
 	}
 	w.advance(minute(2, 20, 0))
@@ -112,7 +112,7 @@ func TestAdvanceAfterTheClockMovedBack(t *testing.T) {
 func TestTruthCountsGuards(t *testing.T) {
 	w := testWorld()
 	w.advance(minute(0, 1, 1))
-	if tr := w.truth("r", fika); tr.Occupancy != 1 || tr.Guards != 1 {
+	if tr := w.truth(fika); tr.Occupancy != 1 || tr.Guards != 1 {
 		t.Errorf("a guard alone in the room: %+v", tr)
 	}
 }

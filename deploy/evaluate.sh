@@ -19,30 +19,8 @@ end=$(date -u -d "$start + $days days" +%F)
 post() { curl -sf -X POST "$clock" -H 'Content-Type: application/json' -d "$1" >/dev/null; }
 log() { echo "$(date +%T) [$run_id] $*"; }
 
-log "pausing the clock at $start 00:00"
-# Stop physics before the clock moves. Still tagged with the previous run, it
-# would otherwise compute the new start time and the sensors would report it,
-# leaving stray records under the old run id.
-docker compose stop physics >/dev/null 2>&1 || true
-post "{\"running\": false}"
-post "{\"date\": \"$start\", \"time\": \"00:00\", \"factor\": $factor}"
-
-log "starting the stack with POLICY=$policy"
-t0=$(date -u +%s)
-RUN_ID=$run_id POLICY=$policy ORACLE_RUN=$oracle_run docker compose up -d >/dev/null 2>&1
-
-# Wait until every device has checked in since the recreate.
-want=$(($(wc -l < deploy/devices.csv) - 1))
-for _ in $(seq 120); do
-  seen=$(curl -sf "http://127.0.0.1:8070/devices?status=active" |
-         T0=$t0 python3 -c "import os,sys,json,datetime as d
-t0=int(os.environ['T0'])
-print(sum(1 for x in json.load(sys.stdin) if x['last_seen'] and d.datetime.fromisoformat(x['last_seen'].replace('Z','+00:00')).timestamp()>=t0))" || echo 0)
-  [ "$seen" -ge "$want" ] && break
-  sleep 2
-done
-log "$seen of $want devices checked in; running until $end 00:00 at factor $factor"
-sleep 10 # let the controller read the registry and the model
+deploy/start-run.sh "$run_id" "$policy" "$start" 00:00 "$factor" "$oracle_run"
+log "running until $end 00:00 at factor $factor"
 post "{\"running\": true}"
 
 while :; do
