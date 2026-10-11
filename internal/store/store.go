@@ -23,7 +23,7 @@ import (
 )
 
 // Streams, named after the MQTT topic prefixes.
-var Streams = []string{"obs", "truth", "decision", "event"}
+var Streams = []string{"obs", "truth", "decision", "event", "state"}
 
 // idPattern guards run ids and model names used as path elements.
 var idPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
@@ -141,7 +141,7 @@ func streamFor(kind string) (stream, obsKind string, err error) {
 		return "obs", kind, nil
 	case "truth", "true_occupancy":
 		return "truth", "", nil
-	case "decision", "event":
+	case "decision", "event", "state":
 		return kind, "", nil
 	}
 	return "", "", fmt.Errorf("unknown kind %q", kind)

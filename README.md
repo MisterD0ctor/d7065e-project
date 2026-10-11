@@ -105,7 +105,12 @@ prints the tables (docs/evaluation-results.md). Pick a new `SUFFIX` each time,
 keep the PC awake (`systemd-inhibit --what=sleep:idle deploy/evaluate-all.sh`),
 and don't restart containers while it runs.
 
-Both scripts start each run with `deploy/start-run.sh`, which brings the
+`deploy/robustness-tests.sh robustness` does the same for the robustness
+tests (T-09, T-10, T-17, T-22, T-23): the override with the controller
+killed, BuildSim restarted, each service killed in turn, and the simulation
+speed raised until readings are missed.
+
+All three scripts start each run with `deploy/start-run.sh`, which brings the
 stack up in the order that keeps one run's last minute out of the next: stop
 everything of ours, set the clock, start the physical model and wait until
 the building's clock shows the start time, then the rest under the new run id.

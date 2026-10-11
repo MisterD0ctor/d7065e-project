@@ -362,8 +362,8 @@ Registered by the registry, like IF-3:
 | `GET /models/latest` | The newest model, with its `name` |
 | `GET /runs/{run_id}/export` | A tar of the run's JSONL files, for offline analysis |
 
-`kind` is `co2`, `temp`, `occupancy`, `true_occupancy`, `truth`, `decision` or
-`event`. `from` and `to` are model time.
+`kind` is `co2`, `temp`, `occupancy`, `true_occupancy`, `truth`, `decision`,
+`event` or `state` (the actuators' reports, IF-9; recorded since 2026-10-11). `from` and `to` are model time.
 
 Storage validates every record before appending it: JSON, a safe `run_id`, a
 room, and an RFC 3339 `model_time`. Bad records are logged and counted at `GET /healthz`, never silently

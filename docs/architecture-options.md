@@ -726,7 +726,7 @@ report §10.
 | NFR-1 | **Air quality:** CO₂ ≤ 1000 ppm for ≥ 95 % of occupied room-minutes over the evaluation period of 5 simulated weekdays (`predictive`) | Evaluation run |
 | NFR-2 | **Comfort:** 20–24 °C for ≥ 95 % of occupied room-minutes | Evaluation run |
 | NFR-3 | **Energy:** energy proxy (fan power + delivered heat) ≥ 30 % below `constant`, and no worse than `reactive` while meeting NFR-1 better than it does | Compare baselines |
-| NFR-4 | **Latency:** a command shows up in BuildSim within 1 control period (≤ 1 model-min, which is ~1 s real at factor 60) | Timestamps in the log, reported as p95 |
+| NFR-4 | **Latency:** a command shows up in BuildSim within 1 control period (≤ 1 model-min, which is ~1 s real at factor 60) | T-21: p95 is 2 model minutes at factor 60, so missed; 93 % are within one |
 | NFR-5 | **Scale:** for the chosen room set (50 rooms: 150 sensor values written by physics and 150 read by the sensors per model minute, which is per real second at factor 60), a full cycle finishes within one sample period | Load test. Measured at factor 120: every sensor reported every minute (D-12) |
 | NFR-6 | **Robustness:** any one of our containers can be killed and restarted without an unsafe state. The actuator falls back to design flow when commands expire (TTL), also when it has lost the time signal or the broker. The loop resumes within 30 s real | Chaos test: `docker kill` each service; T-24, T-40 |
 | NFR-7 | **Reproducibility:** same seed and date give identical occupancy, and every number in the report traces to a run id | T-25: two runs diffed record by record. Failed in the first evaluation (99.6 % equal); holds since the 2026-10-06 fix (D-7) |

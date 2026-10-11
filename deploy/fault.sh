@@ -15,9 +15,9 @@ set -euo pipefail
 device=$1 fault=${2:-}
 cd "$(dirname "$0")/.."
 
-controller=$(docker compose ps -q controller)
+controller=$(docker compose ps -aq controller) # running or not: the run id is in its settings
 if [ -z "$controller" ]; then
-  echo "the controller is not running: start the stack first" >&2
+  echo "there is no controller container: start the stack first" >&2
   exit 1
 fi
 run_id=$(docker inspect "$controller" --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^RUN_ID=//p')

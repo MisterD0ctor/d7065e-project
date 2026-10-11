@@ -4,6 +4,20 @@ Two things the oral exam asks about (Lecture 1, slide 55): where AI advice was
 wrong and how we caught it, and why the design looks the way it does. Add an
 entry whenever either happens. Newest first.
 
+## 2026-10-11: the remaining tests
+
+The tests that had no recorded result were run on the reworked stack, as one
+scripted run (`deploy/robustness-tests.sh`, run `robustness-tests`) and three
+checks by hand. Results are in the test plan; what they found:
+
+| Finding | How it was caught | Fix |
+|---|---|---|
+| NFR-4 is missed: 93 % of commands show in the damper's state within one model minute, the 95th percentile is two | T-21, from the actuators' state reports, which storage now records | Not fixed. An actuator acts once per real second, a whole model minute at factor 60. Stated as a limit |
+| The system keeps up to factor 120 and not beyond: 79 % of readings at 240, 25 % at 960 | T-22 | Not a fault: the physical model polls four times a second and writes only the newest minute. It is the limit to report |
+| A killed container does not come back by itself | T-23: `restart: unless-stopped` does nothing for a container killed under Podman | Not fixed; the script restarts each. A crash (the process exiting by itself) is restarted by the policy; a kill is not |
+| `deploy/fault.sh` refused to work while the controller was down, which is exactly when T-10 needs it | The first try of the run stopped there | It reads the run id from the controller's container, running or not |
+| The first measure of "recovered" after a BuildSim restart said 0 s | Reading the number | It asked the dashboard, whose picture stays fresh for three minutes. Measured again against BuildSim itself: equipment back after 7.8 s, clock and readings after 9.1 s |
+
 ## 2026-10-10: the data path was the wrong shape
 
 Two days before the deadline Kasper saw that our data path is not the lab

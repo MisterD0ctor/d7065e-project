@@ -251,7 +251,8 @@ Every verdict in a run without injected faults is a false alarm.
   predictive policy's decisions in an empty room ventilate for "one person".
   Requiring a count to persist for two readings would remove it, at the cost
   of a minute's delay for a real first arrival.
-- Command latency (NFR-4) is not yet measured: actuators don't report when
-  they reach a target.
+- Command latency (NFR-4) was measured afterwards (T-21): 93 % of commands
+  show within one model minute, the 95th percentile is two. The target of
+  one is missed there, because actuators act on a one-second tick.
 - A second seed, and possibly a factor-60 run, to check the ranking holds.
 - Learn the heating's warm-up rate per room instead of assuming it.

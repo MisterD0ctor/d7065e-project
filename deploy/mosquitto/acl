@@ -33,6 +33,7 @@ topic read obs/#
 topic read truth/#
 topic read decision/#
 topic read event/#
+topic read state/#
 
 user viz
 topic read obs/#
