@@ -1,0 +1,31 @@
+vars: { d2-config: { layout-engine: elk } }
+direction: right
+
+broker: "MQTT broker\nobs/#" { shape: queue }
+registry: "registry" { shape: cylinder }
+storage: "storage\n(latest model)" { shape: cylinder }
+actuators: "Actuator devices"
+
+ctl: "controller  [Container: Go]" {
+  style.fill: transparent
+  intake: "Intake\nparse, drop duplicates\nand stale readings"
+  health: "Sensor check\n(internal/stuck)\nrepeating sensors; counter\nagainst the CO₂ balance"
+  forecast: "Forecast\n(internal/predict)\nper-room profile, or the\noracle's recording"
+  policy: "Policy\nconstant · reactive ·\npredictive · oracle"
+  heating: "Heating schedule\nsetback, optimal start"
+  commander: "Commander\ncmd_id, TTL, retries;\npublishes the decision"
+  plant: "Plant\nrooms, sizing,\nactuator addresses"
+}
+
+broker -> ctl.intake: readings
+ctl.intake -> ctl.health
+ctl.health -> ctl.policy: "trusted CO₂, count"
+ctl.health -> ctl.heating: "trusted temperature"
+ctl.forecast -> ctl.policy: "people within lead time"
+storage -> ctl.forecast: model
+registry -> ctl.plant
+ctl.plant -> ctl.policy: sizing
+ctl.policy -> ctl.commander: airflow
+ctl.heating -> ctl.commander: setpoint
+ctl.commander -> actuators: "command [REST]"
+ctl.commander -> broker: "decision/#"

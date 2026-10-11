@@ -1,0 +1,34 @@
+vars: { d2-config: { layout-engine: elk } }
+direction: right
+host: "One laptop: rootless Podman, one compose network (10.90.0.0/22)" {
+  style.fill: transparent
+  building: "Simulated building" {
+    bs: "buildsim  :9090"
+    occ: "occupancysim  :8081"
+    physics: "physics"
+  }
+  edge: "Edge: one container per device (251)" {
+    sensors: "150 sensors + 1 clock"
+    actuators: "100 actuators  :8080 each"
+  }
+  server: "Building server" {
+    mosquitto: "mosquitto  :1883"
+    controller: controller
+    registry: "registry  :8070\n(volume: SQLite)"
+    storage: "storage  :8090\n(volume: JSONL per run)"
+    viz: "viz  :8060"
+  }
+  eval: "Evaluation" {
+    truthlog: truthlog
+    train: "train (batch)"
+  }
+}
+browser: "Browser" { shape: person }
+browser -> host.server.viz: graphs
+browser -> host.building.bs: "3D viewer"
+browser -> host.server.registry: "installer's form"
+host.edge.sensors -> host.building.bs: REST
+host.edge.actuators -> host.building.bs: REST
+host.edge.sensors -> host.server.mosquitto: MQTT
+host.server.controller -> host.edge.actuators: REST
+host.eval.truthlog -> host.building.bs: REST

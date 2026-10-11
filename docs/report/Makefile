@@ -1,4 +1,7 @@
-# Build the LaTeX final-report template (no diagrams; students add their own).
+# Build the final report (final_report.tex; figures in figures/, rendered from
+# docs/diagrams/*.d2 with `d2 --pad 20 X.d2 ../report/figures/X.pdf`).
+# Without a TeX installation, `tectonic final_report.tex` builds it too.
+# `make DOC=final_report_template` builds the course's empty template.
 #
 # Usage:
 #   make            # build the PDF
@@ -6,7 +9,7 @@
 #   make distclean  # also remove the PDF
 
 PDFLATEX := pdflatex -interaction=nonstopmode -halt-on-error
-DOC      := final_report_template
+DOC      ?= final_report
 
 .PHONY: all clean distclean
 all: $(DOC).pdf
